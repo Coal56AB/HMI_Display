@@ -23,7 +23,8 @@ class Parser:
     def feed(self,data):
         now=time.monotonic()
         if now-self.last>.1:self.buffer.clear()
-        self.last=now;self.buffer.extend(data);frames=[]
+        if data:self.last=now
+        self.buffer.extend(data);frames=[]
         while len(self.buffer)>=3:
             if self.buffer[:2]!=b'\xa5\x5a' or self.buffer[2]>240:
                 del self.buffer[0];continue

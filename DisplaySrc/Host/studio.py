@@ -11,7 +11,7 @@ class StudioLink:
         from PySide2.QtCore import QTimer
         self.window=window
         self.serial=serial.Serial(port,115200,timeout=0,write_timeout=.05)
-        self.parser=Parser();self.actions=Actions(self.action);self.last_state=0;self.last_title=None
+        self.parser=Parser();self.actions=Actions(self.action);self.last_state=0;self.last_title=None;self.last_title_at=0
         self.started=time.monotonic();self.notes=[None]*6;self.alive=True
         self.timer=QTimer(window);self.timer.timeout.connect(self.poll);self.timer.start(5)
     def write(self,data):
@@ -60,7 +60,8 @@ class StudioLink:
             duration=w.allocation.duration_ms if w.allocation else 0
             self.write(state_packet(motors,position,duration,connected=w.client.connected,playing=w.player.state in ('playing','preparing'),paused=w.player.state=='paused',sleep=s.get('sleep',0),reset=s.get('reset',0),micro=s.get('raw',0),mask=w.config['installed_mask']))
             title=getattr(w.song,'title','Композиция')
-            if title!=self.last_title:self.write(title_packet(title));self.last_title=title
+            if title!=self.last_title or t-self.last_title_at>=2:
+                self.write(title_packet(title));self.last_title=title;self.last_title_at=t
             # Actual observed motor notes, no fabricated events. Also usable by a live MIDI adapter.
             at=int((t-self.started)*1000)&0xffffffff
             for i,m in enumerate(motors):
