@@ -1,0 +1,8 @@
+#pragma once
+#define MIDI_UART_TX 4
+#define MIDI_UART_RX 4
+#define MIDI_DEBUG_PIN 5
+#define MIDI_DEBUG_ENABLED 0
+#define USB_VBUS_ENABLE_PIN -1
+#define USB_VBUS_ENABLE_LEVEL 1
+#define MIDI_EVENT_QUEUE_SIZE 64

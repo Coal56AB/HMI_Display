@@ -20,7 +20,7 @@ typedef struct {
     void (*boot_progress)(unsigned,unsigned);
 } DisplayPlatform;
 
-typedef enum {DISPLAY_TOUCH,DISPLAY_RX_BYTE,DISPLAY_RX_ERROR} DisplayEventType;
+typedef enum {DISPLAY_TOUCH,DISPLAY_RX_BYTE,DISPLAY_RX_ERROR,DISPLAY_TOUCH_CANCEL} DisplayEventType;
 typedef struct {
     DisplayEventType type;
     uint32_t now_ms;

@@ -1,6 +1,10 @@
 # Build outputs and packages
 /build/
 .build/
+/Firmware/ESP32/sdkconfig.*
+!/Firmware/ESP32/sdkconfig.defaults
+/Firmware/ESP32/managed_components/
+/Firmware/ESP32/dependencies.lock
 /DisplaySrc/Release/
 dist/
 *.o
@@ -64,3 +68,11 @@ Desktop.ini
 
 # Local module selection metadata
 *.display.json
+
+# Local verification artifacts are not part of the project.
+/DisplaySrc/tests/
+/DisplaySrc/esp32/tests/
+/DisplaySrc/esp32/test.ps1
+/DisplaySrc/Host/test_*.py
+/DisplaySrc/Scripts/test.py
+/Scripts/Check/

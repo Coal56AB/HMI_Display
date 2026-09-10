@@ -1,0 +1,43 @@
+#include "hmi_board.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "esp_log.h"
+#include "esp_system.h"
+
+void __attribute__((weak)) hmi_module_start() {}
+void __attribute__((weak)) hmi_module_tick(uint32_t) {}
+void __attribute__((weak)) hmi_module_send(const uint8_t *, uint16_t) {}
+
+static void ui_task(void *) {
+    hmi_board_init();
+    hmi_boot_status("ASSETS",35);
+    if (display_module.api_version != DISPLAY_API_VERSION ||
+        (display_module.validate && !display_module.validate(&hmi_platform))) {
+        hmi_boot_status("ASSET ERROR",35);
+        ESP_LOGE("hmi", "Incompatible display module or invalid assets");
+        vTaskDelete(nullptr);
+        return;
+    }
+    hmi_module_start();
+    hmi_boot_status("INTERFACE",95);
+    display_init(&hmi_platform);
+    hmi_touch_poll(hmi_platform.now_ms());
+    ESP_LOGI("hmi", "LCD/touch ready; free heap: %lu", (unsigned long)esp_get_free_heap_size());
+    uint32_t previous_loop = hmi_platform.now_ms();
+    for (;;) {
+        const uint32_t now = hmi_platform.now_ms();
+        if(now-previous_loop>hmi_debug.max_loop_ms)hmi_debug.max_loop_ms=now-previous_loop;
+        previous_loop=now;
+        hmi_touch_poll(now);
+        hmi_module_tick(now);
+        // Packet processing can advance last_state beyond the time captured above.
+        display_step(hmi_platform.now_ms());
+        // Yield even with continuous dirty regions. MIDI runs at higher priority.
+        vTaskDelay(1);
+    }
+}
+extern "C" void app_main() {
+    // First application operation: show boot progress before storage, touch or USB.
+    hmi_lcd_init();
+    configASSERT(xTaskCreatePinnedToCore(ui_task, "hmi", 8192, nullptr, 3, nullptr, 1) == pdPASS);
+}

@@ -82,17 +82,3 @@ py -3 DisplaySrc/Host/studio.py --display-port COM8 --motor-port COM6 --studio-d
 не все сырые MIDI-события. Для точной дорожки контроллер ESP32 может отправлять
 MIDI_EVENT напрямую. Физический USB-MIDI обрабатывается на ESP32; UART-контракт
 панели не добавляет USB Host к STM32. Код ESP32 развивается в родительском проекте.
-
-## Проверки
-
-`DisplaySrc/Scripts/test.py`: поворот и касания, числовой ввод, seek, STOP,
-CRC, переполнение RX, ACK/повторы, тайм-аут и переполнение часов, Flash, MIDI,
-границы всех экранов. Исполняется настоящий C-код.
-
-`DisplaySrc/tests/test_host.py`: UART, UTF-8 и повторные команды, настоящий класс
-MusicMotorStudio с виртуальным моторным контроллером, STATE и STOP/ACK.
-Нужен соседний MusicMotorStudio с зависимостями.
-
-`Scripts/Check/check_platform_boundary.py`: сборка другой реализации GUI и
-проверка побайтовой неизменности платформы. На физической плате эта версия
-пока не проверена.

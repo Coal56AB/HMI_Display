@@ -36,11 +36,12 @@ class Parser:
             del self.buffer[:n];frames.append((b[4],b[3],bytes(b[5:-2])))
         return frames
 
-def state_packet(motors,position=0,duration=0,connected=True,playing=False,paused=False,midi=False,sleep=0,reset=0,micro=0,mask=63):
-    flags=int(connected)|int(playing)*2|int(paused)*4|int(midi)*8
+def state_packet(motors,position=0,duration=0,connected=True,playing=False,paused=False,midi=False,sleep=0,reset=0,micro=0,mask=63,known_midi=False):
+    flags=int(connected)|int(playing)*2|int(paused)*4|int(midi)*8|int(known_midi)*32
     data=struct.pack('<BBBBBBII',1,flags,sleep,reset,micro,mask,max(0,int(position)),max(0,int(duration)))
     for motor in motors:
-        data+=struct.pack('<BBI',int(motor['enabled'])|int(motor['active'])*2|int(motor['direction'])*4,motor.get('note',255),round(motor['frequency']*1000))
+        motor_flags=int(motor['enabled'])|int(motor['active'])*2|int(motor['direction'])*4
+        data+=struct.pack('<BBI',motor_flags,motor.get('note',255),round(motor['frequency']*1000))
     if len(data)!=50: raise ValueError('Exactly six motors required')
     return encode(STATE,data)
 

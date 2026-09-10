@@ -20,14 +20,18 @@ class StudioLink:
         from protocol.wire import Command as C
         w=self.window
         if a>10 or m>5:return 2
-        if not w.client.connected:return 1
+        if not w.client.connected:return 12
         if a==0:w.stop_all();return 0
         if a==1:w.toggle_main_playback();return 0
         if a==2:
-            if not w.song.notes:return 1
+            if not w.song.notes:return 10
             w.seek_main_cursor(v);return 0
-        if w.player.state!='stopped':return 1
-        if a in (3,4,5,6) and not w.config['installed_mask']&(1<<m):return 1
+        if w.player.state!='stopped':return 9
+        if a in (3,4,5,6) and not w.config['installed_mask']&(1<<m):return 5
+        status=w.latest_status or {}
+        if a==5 and v:
+            if status.get('reset'):return 3
+            if status.get('sleep'):return 4
         if a==3:
             if not 20000<=v<=4000000:return 2
             w.manual_command(m,'frequency',v/1000)
@@ -58,7 +62,7 @@ class StudioLink:
             motors=s.get('motors',[dict(enabled=False,active=False,direction=False,note=255,frequency=440) for _ in range(6)])
             position=w.player.position if w.player.state!='stopped' else w.main_cursor_ms
             duration=w.allocation.duration_ms if w.allocation else 0
-            self.write(state_packet(motors,position,duration,connected=w.client.connected,playing=w.player.state in ('playing','preparing'),paused=w.player.state=='paused',sleep=s.get('sleep',0),reset=s.get('reset',0),micro=s.get('raw',0),mask=w.config['installed_mask']))
+            self.write(state_packet(motors,position,duration,connected=w.client.connected,playing=w.player.state in ('playing','preparing'),paused=w.player.state=='paused',midi=bool(w.allocation and w.client.connected),sleep=s.get('sleep',0),reset=s.get('reset',0),micro=s.get('raw',0),mask=w.config['installed_mask'],known_midi=bool(w.allocation and w.player.state in ('playing','preparing'))))
             title=getattr(w.song,'title','Композиция')
             if title!=self.last_title or t-self.last_title_at>=2:
                 self.write(title_packet(title));self.last_title=title;self.last_title_at=t
