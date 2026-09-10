@@ -1,0 +1,9 @@
+{
+  "name": "MusicBox",
+  "apiVersion": 2,
+  "firmware": {
+    "sources": ["src/music_box.c"],
+    "includes": ["src"],
+    "defines": []
+  }
+}
