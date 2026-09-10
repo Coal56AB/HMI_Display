@@ -1,0 +1,63 @@
+# Build outputs and packages
+build/
+.build/
+/DisplaySrc/Release/
+dist/
+*.o
+*.obj
+*.a
+*.lib
+*.elf
+*.axf
+*.hex
+*.exe
+*.dll
+*.so
+*.map
+*.lst
+*.pdb
+!Release/**/*.hex
+/Release/**/*.log
+/Release/**/restructure-validation.txt
+
+# Keil generated files and local settings
+Firmware/BluePillHMI/MDK-ARM/ExternalFlash/
+Firmware/BluePillHMI/MDK-ARM/InternalLite/
+Firmware/BluePillHMI/MDK-ARM/Display/
+Firmware/BluePillHMI/MDK-ARM/RTE/_InternalLite/
+Firmware/BluePillHMI/MDK-ARM/DebugConfig/InternalLite*
+*.uvguix.*
+*.uvoptx
+*.mxproject
+*.build_log.htm
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Temporary files
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
+
+# Local settings
+.vscode/
+.idea/
+.codex/
+.env
+.env.*
+!.env.example
+
+# OS metadata
+Thumbs.db
+Desktop.ini
+.DS_Store
