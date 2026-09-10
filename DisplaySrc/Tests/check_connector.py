@@ -17,6 +17,7 @@ with tempfile.TemporaryDirectory(prefix='display-qt-') as tmp:
     connect(MODULE,source,'ExternalFlash',project)
     window=Window();window.path.setText(str(project));window.inspect()
     assert window.apply.isEnabled()
+    assert window.backup.isChecked()
     window.apply.click()
     assert 'Готово' in window.info.toPlainText(),window.info.toPlainText()
     assert project.with_name(project.name+'.bak').is_file()
@@ -28,6 +29,13 @@ with tempfile.TemporaryDirectory(prefix='display-qt-') as tmp:
     except ValueError:pass
     else:raise AssertionError('Incompatible module accepted')
     assert project.read_bytes()==first
+    other=Path(tmp)/'without-backup.uvprojx'
+    connect(MODULE,source,'ExternalFlash',other)
+    window.path.setText(str(other));window.inspect();window.backup.setChecked(False)
+    window.apply.click()
+    assert 'Готово' in window.info.toPlainText(),window.info.toPlainText()
+    assert not other.with_name(other.name+'.bak').exists()
+    assert 'Резервная копия:' not in window.info.toPlainText()
     window.close()
 assert source.read_bytes()==original
 print('Connector PASS: Qt attach, backup, repeat attach, incompatible API refusal; source template unchanged')
