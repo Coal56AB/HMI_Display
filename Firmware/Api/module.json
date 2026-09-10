@@ -1,0 +1,13 @@
+{
+  "name": "Template",
+  "apiVersion": 2,
+  "firmware": {
+    "sources": [
+      "display_empty.c"
+    ],
+    "includes": [
+      "."
+    ],
+    "defines": []
+  }
+}

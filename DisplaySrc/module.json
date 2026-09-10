@@ -1,6 +1,6 @@
 {
   "name": "PCH_HMI",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assets": "Assets/hmi_assets.bin",
   "simulator": "Simulator/START.cmd",
   "resourceBuild": "Scripts/generate_rasters.py",

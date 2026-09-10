@@ -10,8 +10,8 @@ code='''#include <stdint.h>
 static unsigned boot_line_count;
 static int positions[16],n;
 static void boot_text(int x,int y,const char*t,unsigned z,uint16_t col){(void)x;(void)z;(void)col;if(strlen(t)>5&&n<16)positions[n++]=y;}
-static void display_console_begin(unsigned y){(void)y;n=0;}
-static const uint16_t *display_console_pixels(void){return 0;}
+static void boot_begin(unsigned y){(void)y;n=0;}
+static uint16_t boot_pixels[320];
 static void board_write_rect(int a,int b,int c,int d,const uint16_t*p,int e,int f){(void)a;(void)b;(void)c;(void)d;(void)p;(void)e;(void)f;}
 static void Error_Handler(void){}
 '''+s[a:c]+'''\nint main(void){board_boot_progress(0,100);board_boot_progress(1,100);board_boot_progress(4,100);board_boot_progress(5,100);board_boot_progress(6,100);assert(boot_line_count==5);for(int i=1;i<6;i++)assert(positions[i]==40+(i-1)*20);board_boot_error(3);for(int i=0;i<4;i++)assert(positions[i]==140+i*20);return 0;}'''

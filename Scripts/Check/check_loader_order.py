@@ -11,7 +11,7 @@ header=r'''#include <stdint.h>
 #include <string.h>
 #include <stdio.h>
 #define HMI_ASSET_LENGTH 1196668u
-static uint32_t display_assets_size(void){return HMI_ASSET_LENGTH;}
+
 #define FLASH_CS_GPIO_Port 0
 #define FLASH_CS_Pin 0
 #define LOADER_LENGTH 1
@@ -28,8 +28,9 @@ static void flash_probe(void){} static void flash_wait(void){} static void flash
 static void pin(int a,int b,int c){(void)a;(void)b;(void)c;}
 static void tx(void *s,const void *p,unsigned n){(void)s;(void)p;(void)n;assert(!pending);}
 static void board_boot_error(unsigned e){(void)e;assert(0);}
-static int board_assets_read(uint32_t a,void *d,uint32_t n,void *u){(void)a;(void)d;(void)n;(void)u;return 1;}
-static int display_assets_init(int(*r)(uint32_t,void*,uint32_t,void*)){(void)r;assert(!pending);return 1;}
+static int validate(const void *p){(void)p;assert(!pending);return 1;}
+static int board_platform;
+static const struct {unsigned assets_size;int (*validate)(const void*);}display_module={HMI_ASSET_LENGTH,validate};
 static void ack(char c){assert(!pending);if(c=='R')pending=4;else if(c=='D'||c=='p'){unsigned left=HMI_ASSET_LENGTH-received;pending=left>256?256:left;}}
 static void receive(uint8_t *d,uint16_t n,uint32_t t){(void)t;assert(pending==n);pending=0;if(app_debug.loader.stage==LOADER_LENGTH){uint32_t size=HMI_ASSET_LENGTH;memcpy(d,&size,4);}else{memset(d,0,n);received+=n;pages++;}}
 '''

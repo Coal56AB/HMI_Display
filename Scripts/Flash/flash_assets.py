@@ -15,7 +15,7 @@ parser=argparse.ArgumentParser()
 parser.add_argument('--display-dir',type=Path,default=Path(__file__).resolve().parents[2]/'DisplaySrc')
 options,qt_args=parser.parse_known_args()
 MODULE=options.display_dir.resolve()
-MANIFEST=json.loads((MODULE/'module.json').read_text(encoding='utf-8'))
+MANIFEST=json.loads((MODULE/'module.json').read_text(encoding='utf-8')) if (MODULE/'module.json').exists() else {}
 sys.argv=[sys.argv[0]]+qt_args
 
 class Upload(QtCore.QThread):
@@ -231,6 +231,9 @@ class Window(QtWidgets.QWidget):
 
 if __name__ == '__main__':
     app = QtWidgets.QApplication(sys.argv)
+    if not MANIFEST.get('assets'):
+        QtWidgets.QMessageBox.information(None, 'Ресурсы экрана', 'У этого модуля нет внешних ресурсов. Сначала подключите интерфейс.')
+        sys.exit(0)
     app.setStyle('Fusion')
     window = Window()
     window.show()

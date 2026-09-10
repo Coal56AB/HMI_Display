@@ -1,5 +1,5 @@
 # Build outputs and packages
-build/
+/build/
 .build/
 /DisplaySrc/Release/
 dist/
@@ -61,3 +61,6 @@ venv/
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# Local module selection metadata
+*.display.json

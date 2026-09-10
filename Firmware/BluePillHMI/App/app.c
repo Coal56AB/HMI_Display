@@ -1,25 +1,27 @@
 #include "app.h"
 #include "board.h"
 #include "main.h"
-#include "display_module.h"
+#include "display_api.h"
 #include "usart.h"
 volatile AppDebug app_debug={.system={.spi=&hspi1}};
 static uint32_t last_poll;
 static uint32_t last_led;
 int app_uart_byte(uint8_t b){
 #if !LCD_TEST_PATTERN
-    display_receive(b);return 1;
+    DisplayEvent e={.type=DISPLAY_RX_BYTE,.byte=b};display_event(&e);return 1;
 #else
     (void)b;return 0;
 #endif
 }
-void app_uart_error(void){display_receive_error();}
-void display_system_reset(void){NVIC_SystemReset();}
-void display_transport_send(const uint8_t *b,uint16_t n){
+void app_uart_error(void){DisplayEvent e={.type=DISPLAY_RX_ERROR};display_event(&e);}
+static void platform_reset(void){NVIC_SystemReset();}
+static void platform_send(const uint8_t *b,uint16_t n){
     (void)HAL_UART_Transmit(&huart1,(uint8_t *)b,n,20);
 }
 #if !LCD_TEST_PATTERN
 static void poll_ui(uint32_t now);
+static DisplayEvent touch_queue[8];
+static unsigned touch_in,touch_out;
 #endif
 static void write_rect(uint16_t x,uint16_t y,uint16_t w,uint16_t h,
                        const uint16_t *pixels,uint16_t stride,void *user){
@@ -84,13 +86,14 @@ static void render_ui(void){
     uint32_t start=HAL_GetTick(),writes=app_debug.lcd.writes,old_lcd_ms=app_debug.render.lcd_ms;
     uint32_t old_flash_ms=app_debug.render.flash_ms,old_flash_bytes=app_debug.render.flash_bytes;
     uint32_t old_flash_cycles=app_debug.render.flash_cycles;
-    app_debug.render.lcd_ms=0;display_asset_loads_reset();
+    unsigned old_loads=display_module.asset_loads?display_module.asset_loads():0;
+    app_debug.render.lcd_ms=0;
     app_debug.render.flash_ms=0;app_debug.render.flash_bytes=0;
     app_debug.render.flash_cycles=0;
-    display_render();
+    display_step(HAL_GetTick());
     if(app_debug.lcd.writes!=writes){
         app_debug.render.total_ms=HAL_GetTick()-start;
-        app_debug.render.asset_loads=display_asset_loads();app_debug.lcd.frames++;
+        app_debug.render.asset_loads=(display_module.asset_loads?display_module.asset_loads()-old_loads:0);app_debug.lcd.frames++;
     }else{
         app_debug.render.lcd_ms=old_lcd_ms;
         app_debug.render.flash_ms=old_flash_ms;app_debug.render.flash_bytes=old_flash_bytes;
@@ -103,9 +106,12 @@ static void poll_ui(uint32_t now){
     int16_t x=0,y=0;uint8_t down;
     if(now-last_poll<UI_POLL_INTERVAL_MS)return;
     last_poll=now;app_debug.system.tick_ms=now;down=sample_touch(&x,&y);
-    display_touch(x,y,down,now);
+    /* Preserve samples during SPI flushes; dispatch only between renders. */
+    if(touch_in-touch_out<8)touch_queue[touch_in++%8]=(DisplayEvent){DISPLAY_TOUCH,now,x,y,down,0};
 }
 #endif
+const DisplayPlatform board_platform={DISPLAY_API_VERSION,320,480,write_rect,board_assets_read,
+    board_flash_read,board_flash_write,board_flash_erase,HAL_GetTick,platform_send,platform_reset,board_boot_progress};
 void app_init(void){
     app_debug.system.test_enabled=LCD_TEST_PATTERN;
     app_debug.system.clock_hz=SystemCoreClock;
@@ -115,13 +121,13 @@ void app_init(void){
     board_lcd_init();
 #if !LCD_TEST_PATTERN
     app_debug.system.boot_stage=APP_BOOT_ASSETS;
+    if(display_module.api_version!=DISPLAY_API_VERSION)board_boot_error(3);
     board_assets_boot();
-    board_reset_enable();
-    app_debug.storage.ok=(uint8_t)display_assets_init(board_assets_read);
-    if(!app_debug.storage.ok)board_boot_error((unsigned)display_assets_error());
+    app_debug.storage.ok=(uint8_t)(!display_module.validate||display_module.validate(&board_platform));
+    if(!app_debug.storage.ok)board_boot_error((unsigned)(display_module.error?display_module.error():0));
     app_debug.system.boot_stage=APP_BOOT_RENDER;
-    display_init(write_rect);board_boot_progress(6,100);render_ui();
-    if(display_assets_error())board_boot_error((unsigned)display_assets_error());
+    display_init(&board_platform);board_reset_enable();board_boot_progress(6,100);render_ui();
+    if((display_module.error?display_module.error():0))board_boot_error((unsigned)(display_module.error?display_module.error():0));
 #else
     board_reset_enable();
 #endif
@@ -135,9 +141,9 @@ void app_tick(void){
     test_tick(now);
 #else
     /* Apply complete packets only between renders, never inside LCD flush. */
-    display_poll(now);
     poll_ui(now);
+    while(touch_out!=touch_in){display_event(&touch_queue[touch_out%8]);touch_out++;}
     render_ui();
-    if(display_assets_error())board_boot_error((unsigned)display_assets_error());
+    if((display_module.error?display_module.error():0))board_boot_error((unsigned)(display_module.error?display_module.error():0));
 #endif
 }

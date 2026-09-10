@@ -335,9 +335,9 @@
             <v6Rtti>0</v6Rtti>
             <VariousControls>
               <MiscControls>-Oz -std=c99 -Wno-everything -Wall -Wextra</MiscControls>
-              <Define>USE_HAL_DRIVER,STM32F103xB,NDEBUG,HMI_EXTERNAL_ASSETS=1,HMI_LITE=0</Define>
+              <Define>USE_HAL_DRIVER,STM32F103xB,NDEBUG</Define>
               <Undefine />
-              <IncludePath>../Core/Inc;../Drivers/STM32F1xx_HAL_Driver/Inc;../Drivers/STM32F1xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F1xx/Include;../Drivers/CMSIS/Include;../App;../Config;../../../DisplaySrc/Include;../../../DisplaySrc/ThirdParty/tinf;../../../DisplaySrc/Platform/Stm32</IncludePath>
+              <IncludePath>../Core/Inc;../Drivers/STM32F1xx_HAL_Driver/Inc;../Drivers/STM32F1xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F1xx/Include;../Drivers/CMSIS/Include;../App;../Config;../../Api</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -542,64 +542,9 @@
           <GroupName>DisplaySrc</GroupName>
           <Files>
             <File>
-              <FileName>hmi_dirty.c</FileName>
+              <FileName>display_empty.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../../../DisplaySrc/Src/hmi_dirty.c</FilePath>
-            </File>
-            <File>
-              <FileName>hmi_dynamic.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../../../DisplaySrc/Src/hmi_dynamic.c</FilePath>
-            </File>
-            <File>
-              <FileName>hmi_gfx.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../../../DisplaySrc/Src/hmi_gfx.c</FilePath>
-            </File>
-            <File>
-              <FileName>hmi_scene.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../../../DisplaySrc/Src/hmi_scene.c</FilePath>
-            </File>
-            <File>
-              <FileName>hmi_scene_generated.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../../../DisplaySrc/Src/hmi_scene_generated.c</FilePath>
-            </File>
-            <File>
-              <FileName>hmi_storage.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../../../DisplaySrc/Src/hmi_storage.c</FilePath>
-            </File>
-            <File>
-              <FileName>hmi_ui.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../../../DisplaySrc/Src/hmi_ui.c</FilePath>
-            </File>
-            <File>
-              <FileName>telemetry.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../../../DisplaySrc/Src/telemetry.c</FilePath>
-            </File>
-            <File>
-              <FileName>tinflate.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../../../DisplaySrc/ThirdParty/tinf/tinflate.c</FilePath>
-            </File>
-            <File>
-              <FileName>display_module.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../../../DisplaySrc/Platform/Stm32/display_module.c</FilePath>
-            </File>
-            <File>
-              <FileName>journal_app.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../../../DisplaySrc/Platform/Stm32/journal_app.c</FilePath>
-            </File>
-            <File>
-              <FileName>journal_store.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../../../DisplaySrc/Platform/Stm32/journal_store.c</FilePath>
+              <FilePath>../../Api/display_empty.c</FilePath>
             </File>
           </Files>
         </Group>

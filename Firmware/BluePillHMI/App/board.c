@@ -3,7 +3,7 @@
 #include "main.h"
 #include "spi.h"
 #include "usart.h"
-#include "display_module.h"
+#include "display_api.h"
 #include <string.h>
 __weak int app_uart_byte(uint8_t b){(void)b;return 0;}
 __weak void app_uart_error(void){}
@@ -45,6 +45,14 @@ static void lcd_reg(uint8_t command,const uint8_t *data,unsigned n){
     pin(LCD_CS_GPIO_Port,LCD_CS_Pin,1);
 }
 
+/* The platform owns boot drawing. One scanline costs 640 bytes, no GUI buffer. */
+static uint16_t boot_pixels[320];
+static unsigned boot_y;
+static void boot_begin(unsigned y){boot_y=y;memset(boot_pixels,0,sizeof(boot_pixels));}
+static void boot_pixel(int x,int y,unsigned size,uint16_t color){
+    if((int)boot_y<y||(int)boot_y>=y+(int)size)return;
+    for(unsigned dx=0;dx<size;dx++)if(x+(int)dx>=0&&x+(int)dx<320)boot_pixels[x+dx]=color;
+}
 #include "boot_font.h"
 static void boot_text(int x,int y,const char *text,unsigned scale,uint16_t color){
     const unsigned char *p=(const unsigned char *)text;
@@ -52,14 +60,14 @@ static void boot_text(int x,int y,const char *text,unsigned scale,uint16_t color
         if(cp>=0xc0){cp=((cp&31u)<<6)|(*p++&63u);}
         for(i=0;i<sizeof(boot_codepoints)/sizeof(*boot_codepoints);i++)if(boot_codepoints[i]==cp)break;
         if(i<sizeof(boot_codepoints)/sizeof(*boot_codepoints))for(unsigned row=0;row<12;row++)for(unsigned col=0;col<8;col++)
-            if(boot_glyphs[i][row]&(1u<<col))display_console_pixel(x+(int)(col*scale),y+(int)(row*scale),scale,color);
+            if(boot_glyphs[i][row]&(1u<<col))boot_pixel(x+(int)(col*scale),y+(int)(row*scale),scale,color);
         x+=(int)(8*scale);
     }
 }
 static unsigned boot_line_count;
 /* Minimal boot console. The font is internal, independent of external assets. */
 void board_boot_progress(unsigned stage,unsigned percent){
-    static const char *const names[]={"ДИСПЛЕЙ","МИКРОСХЕМА FLASH","СТИРАНИЕ FLASH","ЗАПИСЬ РЕСУРСОВ","ПРОВЕРКА РЕСУРСОВ","ЖУРНАЛ","СИСТЕМА ГОТОВА"};
+    static const char *const names[]={"ДИСПЛЕЙ","МИКРОСХЕМА FLASH","СТИРАНИЕ FLASH","ЗАПИСЬ РЕСУРСОВ","ПРОВЕРКА РЕСУРСОВ","МОДУЛЬ","СИСТЕМА ГОТОВА"};
     static unsigned last_stage=99,last_percent=99;
     static unsigned seen,completed;
     char number[5];unsigned start,end,row=0;
@@ -71,27 +79,27 @@ void board_boot_progress(unsigned stage,unsigned percent){
     seen|=1u<<stage;if(percent==100)completed|=1u<<stage;else completed&=~(1u<<stage);
     last_stage=stage;last_percent=percent;
     number[0]=(char)('0'+percent/100);number[1]=(char)('0'+percent/10%10);number[2]=(char)('0'+percent%10);number[3]='%';number[4]=0;
-    for(unsigned y=start;y<end;y+=4){
-        display_console_begin(y);
+    for(unsigned y=start;y<end;y++){
+        boot_begin(y);
         boot_text(8,16,"ИНИЦИАЛИЗАЦИЯ СИСТЕМЫ",1,61342u);
         row=0;for(unsigned i=0;i<7;i++)if(seen&(1u<<i)){
             boot_text(8,40+row*20,names[i],1,44503u);
             boot_text(272,40+row*20,completed&(1u<<i)?"OK":i==stage?number+(percent<100?(percent<10?2:1):0):"...",1,completed&(1u<<i)?36454u:61342u);row++;
         }
-        boot_line_count=row;board_write_rect(0,y,320,4,display_console_pixels(),320,0);
+        boot_line_count=row;board_write_rect(0,y,320,1,boot_pixels,320,0);
     }
 }
 void board_boot_error(unsigned reason){
     static const char *const reasons[]={"ОШИБКА FLASH","ОШИБКА ЧТЕНИЯ FLASH","РЕСУРСЫ НЕ НАЙДЕНЫ","РЕСУРСЫ НЕСОВМЕСТИМЫ","ОШИБКА CRC РЕСУРСОВ","FLASH НЕ ОБНАРУЖЕНА","ОБРЫВ ЗАПИСИ РЕСУРСОВ"};
     if(reason>6)reason=0;
     unsigned first=40+boot_line_count*20;
-    for(unsigned y=first;y<480;y+=4){
-        display_console_begin(y);
+    for(unsigned y=first;y<480;y++){
+        boot_begin(y);
         boot_text(8,first,"ОШИБКА ИНИЦИАЛИЗАЦИИ",1,62154u);
         boot_text(8,first+20,reasons[reason],1,62154u);
         boot_text(8,first+40,reason==1||reason==5?"ПРОВЕРЬТЕ ПОДКЛЮЧЕНИЕ FLASH":"ОБНОВИТЕ РЕСУРСЫ ЭКРАНА",1,44503u);
         boot_text(8,first+60,"ЗАГРУЗЧИК UART ДОСТУПЕН",1,44503u);
-        board_write_rect(0,y,320,4,display_console_pixels(),320,0);
+        board_write_rect(0,y,320,1,boot_pixels,320,0);
     }
     Error_Handler();
 }
@@ -220,18 +228,18 @@ static void ack(uint8_t b){if(HAL_UART_Transmit(&huart1,&b,1,100)!=HAL_OK){
     app_debug.loader.uart_error=huart1.ErrorCode;app_debug.loader.stage=LOADER_UART_ERROR;board_boot_error(6);
 }}
 int board_flash_read(uint32_t at,void *data,uint32_t n){
-    if(at<0x128000u||at+n>0x200000u)return 0;
+    if(at<((display_module.assets_size+4095u)&~4095u)||at>0x200000u||n>0x200000u-at)return 0;
     return board_assets_read(at,data,n,0);
 }
 int board_flash_erase(uint32_t at){
     uint8_t cmd[4]={0x20,(uint8_t)(at>>16),(uint8_t)(at>>8),(uint8_t)at};
-    if(at<0x128000u||at>=0x200000u||(at&4095u))return 0;
+    if(at<((display_module.assets_size+4095u)&~4095u)||at>=0x200000u||(at&4095u))return 0;
     flash_wait();flash_command(6);pin(FLASH_CS_GPIO_Port,FLASH_CS_Pin,0);
     tx(&hspi1,cmd,4);pin(FLASH_CS_GPIO_Port,FLASH_CS_Pin,1);flash_wait();return 1;
 }
 int board_flash_write(uint32_t at,const void *data,uint32_t n){
     const uint8_t *p=data;
-    if(at<0x128000u||at+n>0x200000u)return 0;
+    if(at<((display_module.assets_size+4095u)&~4095u)||at>0x200000u||n>0x200000u-at)return 0;
     while(n){
         uint32_t part=256u-(at&255u);uint8_t cmd[4]={2,(uint8_t)(at>>16),(uint8_t)(at>>8),(uint8_t)at};
         if(part>n)part=n;
@@ -270,6 +278,7 @@ static int boot_request(void){
     app_debug.loader.stage=LOADER_NO_COMMAND;return 0;
 }
 void board_assets_boot(void){
+    if(!display_module.assets_size)return;
     uint8_t length[4],page[256],command[4];uint32_t at,n,size;
     /* Send PCHW during the configured boot window to install resources. */
     board_boot_progress(1,0);
@@ -278,7 +287,7 @@ void board_assets_boot(void){
     ack('R');
     receive(length,4,2000);
     size=(uint32_t)length[0]|((uint32_t)length[1]<<8)|((uint32_t)length[2]<<16)|((uint32_t)length[3]<<24);
-    if(size!=display_assets_size()){app_debug.loader.stage=LOADER_BAD_LENGTH;ack('E');board_boot_error(3);}
+    if(size!=display_module.assets_size){app_debug.loader.stage=LOADER_BAD_LENGTH;ack('E');board_boot_error(3);}
     flash_probe();flash_wait();app_debug.loader.stage=LOADER_ERASE;
     for(at=0;at<size;at+=4096){
         app_debug.storage.offset=at;board_boot_progress(2,at*100/size);
@@ -297,7 +306,7 @@ void board_assets_boot(void){
     }
     /* The same CRC/header check used at startup verifies the installed image. */
     app_debug.loader.stage=LOADER_VERIFY;
-    app_debug.storage.ok=(uint8_t)display_assets_init(board_assets_read);
+    app_debug.storage.ok=(uint8_t)(!display_module.validate||display_module.validate(&board_platform));
     ack(app_debug.storage.ok?'K':'E');
     if(app_debug.storage.ok)app_debug.loader.stage=LOADER_DONE;
 }

@@ -1,8 +1,8 @@
 #include "journal_app.h"
 #include "journal_store.h"
 #include "telemetry.h"
-#include "board.h"
-#include "main.h"
+#include "module_services.h"
+
 #include <stdio.h>
 #include <string.h>
 static HmiUi *ui;
@@ -52,10 +52,10 @@ void telemetry_notice(unsigned code,float value){
  if(code==114||(code>=150&&code<=154))return;
  enqueue(code,0,value);
 }
-void telemetry_clock(uint32_t stamp){if(stamp>=1577836800u){wall=stamp;wall_tick=HAL_GetTick();}}
+void telemetry_clock(uint32_t stamp){if(stamp>=1577836800u){wall=stamp;wall_tick=module_platform->now_ms();}}
 void journal_app_init(HmiUi *state){
  ui=state;queued=0;wall=0;refresh=1;
- (void)journal_init((JournalIo){board_flash_read,board_flash_write,board_flash_erase});
+ (void)journal_init((JournalIo){module_platform->flash_read,module_platform->flash_write,module_platform->flash_erase});
  ui->state.journal=rows;ui->state.journal_paged=1;ui->state.journal_count=0;
  enqueue(130,0,0);
 }

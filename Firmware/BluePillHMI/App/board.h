@@ -2,6 +2,8 @@
 #define BOARD_H
 #include "project_config.h"
 #include <stdint.h>
+#include "display_api.h"
+extern const DisplayPlatform board_platform;
 void board_lcd_init(void);
 void board_boot_error(unsigned reason);
 void board_boot_progress(unsigned stage,unsigned percent);

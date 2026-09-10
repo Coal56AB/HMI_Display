@@ -1,8 +1,8 @@
 """Verify that resource generation and the simulator work without a parent project."""
 from pathlib import Path
 import argparse,os,shutil,subprocess,sys,tempfile
-ROOT=Path(__file__).resolve().parents[2]
-p=argparse.ArgumentParser();p.add_argument('--display-dir',type=Path,default=ROOT/'DisplaySrc');a=p.parse_args()
+ROOT=Path(__file__).resolve().parents[1]
+p=argparse.ArgumentParser();p.add_argument('--display-dir',type=Path,default=ROOT);a=p.parse_args()
 with tempfile.TemporaryDirectory(prefix='display-isolation-') as work:
  module=Path(work)/'IndependentDisplay'
  shutil.copytree(a.display_dir,module,ignore=shutil.ignore_patterns('.build','Release','__pycache__','.git'))
