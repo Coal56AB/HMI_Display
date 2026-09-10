@@ -1,5 +1,6 @@
 #ifndef APP_H
 #define APP_H
+#include <stdint.h>
 #include "spi.h"
 /* Inspect app_debug.system.boot_stage if startup stops. */
 enum AppBootStage {
@@ -61,6 +62,4 @@ typedef struct {
 extern volatile AppDebug app_debug;
 void app_init(void);
 void app_tick(void);
-/* Implement this hook to build your own interface. */
-void app_touch(int16_t x,int16_t y,uint8_t pressed);
 #endif

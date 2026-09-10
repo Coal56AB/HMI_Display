@@ -3,6 +3,8 @@
 #include "project_config.h"
 #include <stdint.h>
 void board_lcd_init(void);
+void board_boot_error(unsigned reason);
+void board_boot_progress(unsigned stage,unsigned percent);
 void board_write_rect(uint16_t x,uint16_t y,uint16_t w,uint16_t h,const uint16_t *pixels,uint16_t stride,void *user);
 uint8_t board_touch(int16_t *x,int16_t *y);
 /* Diagnostic read even with IRQ high; raw values are meaningful while pressed. */

@@ -1,0 +1,358 @@
+{
+  "format": "pch1000-hmi-editor",
+  "version": 1,
+  "name": "ПЧ-1000 HMI",
+  "created": "2026-09-05T10:16:04.042Z",
+  "global": {
+    "#page-home>div.home-schema:nth-of-type(1)>svg.schema>g:nth-of-type(1)>text.schema-symbol.motor-letter:nth-of-type(6)": {
+      "dy": -2.1367340087890625,
+      "dx": -0.011999511718727263
+    },
+    "#mains-wave": {},
+    "#dc-capacitor": {},
+    "#precharge-box": {},
+    "#precharge-bypass": {},
+    "#charge-time": {},
+    "#inverter-box": {},
+    "#charge-time-box": {},
+    "#clock": {
+      "fontSize": 15,
+      "textDy": -2
+    },
+    "#header-brand>span.header-help-mark:nth-of-type(2)": {
+      "dy": 0,
+      "dx": 0
+    },
+    "#dc-box": {},
+    "#motor-load": {},
+    "#motor-load-row>div.big": {},
+    "#motor-frequency-row>div.big": {},
+    "#motor-frequency": {},
+    "#motor-frequency-unit": {},
+    "#motor-load-row>div.big>span.unit:nth-of-type(2)": {
+      "textDx": 3
+    },
+    "#graph-tabs>button.tab.active[data-graph=\"limit\"]:nth-of-type(3)": {},
+    "#time-hour": {
+      "fontSize": 25,
+      "bold": true,
+      "textDy": -5
+    },
+    "#time-minute": {
+      "textDy": -5,
+      "fontSize": 25,
+      "bold": true
+    },
+    "#chart": {},
+    "nav.bottom>button.nav[data-page=\"home\"]:nth-of-type(1)>svg>path": {},
+    "#page-graphs>div.graph-controls:nth-of-type(4)": {},
+    "#page-graphs>div.graph-controls:nth-of-type(4)>div.graph-control-row.scale-row>button.gbtn[data-act=\"zoomin\"]:nth-of-type(2)": {},
+    "nav.bottom>button.nav[data-page=\"home\"]:nth-of-type(1)": {},
+    "#page-graphs>div.title.setpoint-summary:nth-of-type(1)>span.summary-item.encoder-target[data-summary=\"mod\"]:nth-of-type(1)": {},
+    "#page-home": {},
+    "#header-brand": {
+      "sx": 0.9996765748681411,
+      "bold": false
+    },
+    "#control-panel>div.control-head:nth-of-type(1)>span:nth-of-type(1)": {},
+    "#page-home>div.home-schema:nth-of-type(1)>svg.schema>g:nth-of-type(1)": {},
+    "#control-panel>div.control-head:nth-of-type(1)>span:nth-of-type(3)": {},
+    "#motor-speed-unit": {},
+    "#page-home>div.home-schema:nth-of-type(1)>svg.schema>g.schema-reading:nth-of-type(2)": {},
+    "#inverter-ugo": {},
+    "#dc-capacitor>path:nth-of-type(2)": {},
+    "#page-graphs": {},
+    "#graph-tabs>button.tab[data-graph=\"dqQ\"]:nth-of-type(5)": {},
+    "#page-graphs>div.chart-zone:nth-of-type(3)": {},
+    "#graph-tabs>button.tab[data-graph=\"speed\"]:nth-of-type(2)": {},
+    "#graph-tabs>button.tab[data-graph=\"power\"]:nth-of-type(1)": {},
+    "#flow-output": {},
+    "#page-home>div.home-schema:nth-of-type(1)>svg.schema>g:nth-of-type(1)>text.schema-symbol:nth-of-type(4)": {},
+    "#page-home>div.home-schema:nth-of-type(1)>svg.schema": {},
+    "#page-home>div.home-schema:nth-of-type(1)>svg.schema>g:nth-of-type(1)>text.schema-symbol:nth-of-type(3)": {},
+    "#page-home>div.home-schema:nth-of-type(1)>svg.schema>g:nth-of-type(1)>text.schema-symbol:nth-of-type(5)": {},
+    "#output-dc-row": {},
+    "#motor-speed-row>div.big": {},
+    "#header-page-title": {
+      "bold": true
+    },
+    "header.topbar": {},
+    "#filter-btn": {
+      "text": "ФИЛЬТР ЖУРНАЛА"
+    },
+    "#journal-body>div.journal-row.info:nth-of-type(1)>span.journal-time:nth-of-type(1)": {},
+    "#journal-body>div.journal-row.info:nth-of-type(2)>span.journal-time:nth-of-type(1)": {},
+    "#page-journal": {},
+    "#page-params>div.params-wrap:nth-of-type(2)": {},
+    "#run-text": {
+      "fontSize": 13,
+      "dx": -1.727273941040039
+    },
+    "#param-pane>div.param-row.param-choice:nth-of-type(2)": {},
+    "#param-pane>div.param-row.editable:nth-of-type(4)>span:nth-of-type(1)": {},
+    "#run-state>i": {
+      "dx": 0,
+      "dy": 0.6363630294799805
+    },
+    "#page-params>div.title.setpoint-summary:nth-of-type(1)>span.summary-item[data-summary=\"limit\"]:nth-of-type(3)": {},
+    "#run-mode>span.uf-slash": {},
+    "#run-state": {},
+    "#run-mode": {
+      "dx": -2.840911865234375
+    }
+  },
+  "scenes": {},
+  "runtimeUi": {
+    "version": 1,
+    "controller": "Src/hmi_ui.c",
+    "coordinateSpace": {
+      "width": 320,
+      "height": 480
+    },
+    "note": "Static scene export unchanged. Runtime values, selection and modal overlays are drawn by the C controller. Existing Android editor needs support for this optional runtimeUi metadata to preview overlays.",
+    "numericFieldYById": [
+      0,
+      0,
+      0,
+      92,
+      126,
+      161,
+      155,
+      189,
+      224,
+      155,
+      189,
+      223,
+      257,
+      292,
+      326,
+      360,
+      394,
+      92,
+      140,
+      188,
+      236,
+      284,
+      333,
+      381,
+      126,
+      160,
+      228,
+      92,
+      126,
+      160,
+      194,
+      228
+    ],
+    "sensorDisplay": {
+      "rowY": 114,
+      "rowStep": 33,
+      "rowCount": 8,
+      "toggleX": 247,
+      "toggleWidth": 52,
+      "rowHeight": 29,
+      "cancel": [
+        21,
+        385,
+        137,
+        33
+      ],
+      "save": [
+        163,
+        385,
+        137,
+        33
+      ]
+    },
+    "previewCommand": "make && build/ui_preview preview.ppm 4",
+    "textCompositing": {
+      "background": "transparent",
+      "restore": "Replay scene geometry while suppressing replaced exported text anchors, then alpha-blend live glyphs.",
+      "homeValues": "Single dynamic layer; preserve panel headings, dividers and schematic block backgrounds."
+    },
+    "rasterBackgrounds": {
+      "format": "RGB565 lossless PackBits",
+      "strip": [
+        320,
+        8
+      ],
+      "scenes": 54,
+      "deduplicate": true,
+      "image": "Assets/hmi_assets.bin",
+      "generator": "Scripts/generate_rasters.py",
+      "dynamicLayers": [
+        "transparent values",
+        "selected button backgrounds and outlines",
+        "telemetry status and discharge indication",
+        "live graph samples/ranges",
+        "journal entries"
+      ]
+    },
+    "cardHitAreas": {
+      "gesture": "double tap, <380 ms and <28 px radius",
+      "area": "entire schema, control, output and motor card",
+      "singleControlTap": "select row"
+    },
+    "cardValueLayout": {
+      "align": "left, no inset",
+      "fontPx": 16,
+      "outputBaselines": [
+        323,
+        361,
+        399
+      ],
+      "motorBaselines": [
+        323,
+        355,
+        388,
+        420
+      ]
+    },
+    "helpBadge": {
+      "center": [
+        211,
+        17
+      ],
+      "radius": 8,
+      "baseline": 22,
+      "hit": [
+        112,
+        1,
+        138,
+        32
+      ]
+    },
+    "selectorFeedback": "Repaint selected background and border; custom selectors take priority over generic edit fields.",
+    "telemetryOverlay": {
+      "field": "HmiState.telemetry_flags",
+      "flags": {
+        "active": 128,
+        "online": 1,
+        "mains": 2,
+        "bypass": 4,
+        "passiveDischarge": 8,
+        "inverterDischarge": 16
+      },
+      "graph": "240-point history; single-column live packets; amber transition text only",
+      "backgroundColors": {
+        "off": 4324,
+        "on": 6531,
+        "transition": 12610,
+        "fault": 16547
+      },
+      "highlight": "Replace only keyed background RGB565 colors inside the existing box; preserve symbols and original borders; no additional outline.",
+      "secondaryTabs": "graphs, parameters and journal: equal full-width control cells; selected blue-gray; transition text amber",
+      "modalPolicy": "live status header; no page telemetry over modal content"
+    },
+    "pendingSetpoints": {
+      "fields": [
+        "pending_setpoints[3]",
+        "pending_mask"
+      ],
+      "units": [
+        "%",
+        "Hz",
+        "%"
+      ],
+      "layout": "pending cyan above applied green; dirty invalidation per row"
+    },
+    "helpScroll": {
+      "gesture": "none",
+      "navigation": "previous / page number / next",
+      "cards": true,
+      "colorLegend": true
+    },
+    "uartSimulator": {
+      "source": "HMI_F407_F103_Simulator(5).html",
+      "launcher": "SIMULATOR.cmd",
+      "capacitanceF": 0.003,
+      "prechargeOhms": 150,
+      "pendingApply": "short press",
+      "selectNext": "hold 500 ms",
+      "renderer": "native C DLL, bundled assets and renderer-build.json"
+    },
+    "journal": {
+      "storage": "W25Q16, two atomic banks",
+      "base": 1212416,
+      "bytes": 884736,
+      "recordBytes": 16,
+      "capacity": 27392,
+      "packing": "delete through YYMMDD inclusive; copy retained records into alternate bank; commit last",
+      "warningPercent": 90,
+      "clearModes": [
+        "all with confirmation",
+        "through selected date inclusive with confirmation"
+      ],
+      "eventPolicy": "Drive process transitions, faults, connectivity and storage maintenance; omit navigation, selection and setpoint edits",
+      "rowsClip": [
+        9,
+        133,
+        302,
+        254
+      ]
+    },
+    "localRevision": {
+      "secondarySelection": {
+        "top": 21326,
+        "bottom": 14987,
+        "regulation": "yellow text only"
+      },
+      "homeSelection": "existing amber regulation background, green selected outline; full 27-pixel row cleanup",
+      "help": "semantic phrase colors; pages; live header retained; question placed after measured title",
+      "parameterPages": {
+        "motor": [
+          "nameplate",
+          "equivalent circuit"
+        ],
+        "protections": [
+          "electrical",
+          "temperature",
+          "mains voltage/frequency"
+        ],
+        "auto": "nameplate then controller progress"
+      },
+      "boot": "Generic console, 20 px line pitch, only visited stages occupy rows; error lines follow stage output",
+      "maintenance": "actual erase/copy/CRC progress",
+      "graphs": {
+        "pcSamplesPerChannel": 600000,
+        "deviceSamplesPerChannel": 240,
+        "live": "left-to-right sweep",
+        "history": "half-window steps, time relative to last recorded point",
+        "statsHz": 1
+      },
+      "simulator": "Same external-asset C renderer and UART parser in a native DLL; HTML controller model only",
+      "brightness": "hidden: no connected backlight control pin",
+      "review": {
+        "system": "Nominal parameters, labelled algorithm immediately afterwards, then firmware version",
+        "header": "Title centered on 320 px display; 16 px clock; question after title",
+        "rom": "Five 47 px rows; actions y=385, fully inside modal",
+        "journal": "Rounded modal over dimmed current journal",
+        "motorConnection": "Y and primitive triangle symbols",
+        "graphs": "Forward sweep, frozen prefix on stop, half-window history and offset time axis",
+        "discharge": "Inverter by default",
+        "fault": "Live fault uses de-energized schematic geometry; colors remain controller-owned",
+        "regulation": "Motor only; inverter retains normal color during regulation and inverter discharge"
+      }
+    },
+    "renderContract": {
+      "layers": [
+        "immutable geometry",
+        "controller state palette",
+        "visible text",
+        "modal"
+      ],
+      "states": [
+        "off",
+        "normal",
+        "warning",
+        "fault"
+      ],
+      "stateSource": "UART TYPE 9: controller owns all protection decisions",
+      "hiddenFields": "Remaining card rows share the available height; larger numeric values for one or two rows",
+      "settings": "28 px field height, 30 px pitch, physical equivalent for protections",
+      "topControls": "318 px, 3 equal cells; selected blue-gray; warning text only",
+      "graphs": "TYPE 10 one live column, partial restore, at most 4 x 178 pixels after initialization; statistics 1 Hz",
+      "simulator": "same external-asset C renderer and firmware UART parser compiled into DLL at EXE build"
+    }
+  }
+}

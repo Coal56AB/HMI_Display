@@ -1,0 +1,172 @@
+{
+  "current": {
+    "objects": {
+      "hmi_gfx": {
+        "code_const": 184000,
+        "ram": 4512,
+        "sections": {
+          ".text": 5440,
+          ".data": 0,
+          ".bss": 4512,
+          ".xdata": 456,
+          ".pdata": 456,
+          ".rdata": 178496,
+          ".rdata$zzz": 64
+        }
+      },
+      "hmi_scene": {
+        "code_const": 2144,
+        "ram": 0,
+        "sections": {
+          ".text": 1744,
+          ".data": 0,
+          ".bss": 0,
+          ".xdata": 36,
+          ".rdata": 160,
+          ".pdata": 36,
+          ".rdata$zzz": 64,
+          ".rdata$.refptr.hmi_generated_strings": 16,
+          ".rdata$.refptr.hmi_generated_clip_rects": 16,
+          ".rdata$.refptr.hmi_generated_values": 16,
+          ".rdata$.refptr.hmi_generated_templates": 16,
+          ".rdata$.refptr.hmi_generated_primitive_data": 16,
+          ".rdata$.refptr.hmi_generated_primitive_offsets": 16,
+          ".rdata$.refptr.hmi_generated_block_commands": 16,
+          ".rdata$.refptr.hmi_generated_block_offsets": 16,
+          ".rdata$.refptr.hmi_generated_block_bounds": 16,
+          ".rdata$.refptr.hmi_generated_scenes": 16,
+          ".rdata$.refptr.hmi_generated_scene_blocks": 16
+        }
+      },
+      "hmi_scene_generated": {
+        "code_const": 141536,
+        "ram": 0,
+        "sections": {
+          ".text": 0,
+          ".data": 0,
+          ".bss": 0,
+          ".rdata": 141472,
+          ".rdata$zzz": 64
+        }
+      },
+      "hmi_dirty": {
+        "code_const": 2448,
+        "ram": 224,
+        "sections": {
+          ".text": 2368,
+          ".data": 0,
+          ".bss": 224,
+          ".xdata": 112,
+          ".pdata": 132,
+          ".rdata$zzz": 64,
+          ".rdata$.refptr.hmi_generated_data_bytes": 16
+        }
+      },
+      "hmi_dynamic": {
+        "code_const": 4880,
+        "ram": 0,
+        "sections": {
+          ".text": 4688,
+          ".data": 0,
+          ".bss": 0,
+          ".xdata": 68,
+          ".pdata": 48,
+          ".rdata": 128,
+          ".rdata$zzz": 64
+        }
+      },
+      "hmi_ui": {
+        "code_const": 18512,
+        "ram": 0,
+        "sections": {
+          ".text": 14480,
+          ".data": 0,
+          ".bss": 0,
+          ".xdata": 196,
+          ".pdata": 180,
+          ".rdata": 3968,
+          ".rdata$zzz": 64
+        }
+      }
+    },
+    "code_const": 353520,
+    "ram": 4736
+  },
+  "baseline": {
+    "objects": {
+      "hmi_gfx": {
+        "code_const": 226112,
+        "ram": 10656,
+        "sections": {
+          ".text": 5600,
+          ".data": 0,
+          ".bss": 10656,
+          ".xdata": 440,
+          ".pdata": 456,
+          ".rdata": 220448,
+          ".rdata$zzz": 64
+        }
+      },
+      "hmi_scene": {
+        "code_const": 1792,
+        "ram": 0,
+        "sections": {
+          ".text": 1440,
+          ".data": 0,
+          ".bss": 0,
+          ".xdata": 36,
+          ".rdata": 160,
+          ".pdata": 36,
+          ".rdata$zzz": 64,
+          ".rdata$.refptr.hmi_generated_strings": 16,
+          ".rdata$.refptr.hmi_generated_clip_rects": 16,
+          ".rdata$.refptr.hmi_generated_primitive_words": 16,
+          ".rdata$.refptr.hmi_generated_primitive_offsets": 16,
+          ".rdata$.refptr.hmi_generated_block_commands": 16,
+          ".rdata$.refptr.hmi_generated_block_offsets": 16,
+          ".rdata$.refptr.hmi_generated_scenes": 16,
+          ".rdata$.refptr.hmi_generated_scene_blocks": 16
+        }
+      },
+      "hmi_scene_generated": {
+        "code_const": 260320,
+        "ram": 0,
+        "sections": {
+          ".text": 0,
+          ".data": 0,
+          ".bss": 0,
+          ".rdata": 260256,
+          ".rdata$zzz": 64
+        }
+      },
+      "hmi_dirty": {
+        "code_const": 2400,
+        "ram": 224,
+        "sections": {
+          ".text": 2320,
+          ".data": 0,
+          ".bss": 224,
+          ".xdata": 104,
+          ".pdata": 120,
+          ".rdata$zzz": 64,
+          ".rdata$.refptr.hmi_generated_data_bytes": 16
+        }
+      },
+      "hmi_dynamic": {
+        "code_const": 4880,
+        "ram": 0,
+        "sections": {
+          ".text": 4688,
+          ".data": 0,
+          ".bss": 0,
+          ".xdata": 68,
+          ".pdata": 48,
+          ".rdata": 128,
+          ".rdata$zzz": 64
+        }
+      }
+    },
+    "code_const": 495504,
+    "ram": 10880
+  }
+}
