@@ -1,0 +1,185 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1560" viewBox="0 0 1600 1560">
+<rect x="0" y="0" width="1600" height="1560" rx="0" fill="#f5f7fb" stroke="none" stroke-width="1"/>
+<text x="70" y="80" font-family="Segoe UI,Arial,sans-serif" font-size="44" font-weight="700" text-anchor="start" fill="#172b4d">3.5 inch RPi LCD · разъём 2 × 13</text>
+<text x="70" y="125" font-family="Segoe UI,Arial,sans-serif" font-size="27" font-weight="400" text-anchor="start" fill="#172b4d">Полная нумерация контактов + твои подключения к Blue Pill</text>
+<text x="70" y="172" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="400" text-anchor="start" fill="#172b4d">Вид на гнёзда с обратной стороны дисплея — как на присланном фото.</text>
+<text x="70" y="210" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="400" text-anchor="start" fill="#172b4d">Ориентир: +5 V вверху слева, T_CS внизу слева. Плата продолжается вправо →</text>
+<text x="70" y="259" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="700" text-anchor="start" fill="#667085">СИГНАЛ ДИСПЛЕЯ</text>
+<text x="515" y="259" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="700" text-anchor="start" fill="#667085">BLUE PILL</text>
+<text x="976" y="259" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="700" text-anchor="start" fill="#667085">СИГНАЛ ДИСПЛЕЯ</text>
+<text x="1375" y="259" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="700" text-anchor="start" fill="#667085">BLUE PILL</text>
+<rect x="695" y="276" width="210" height="933" rx="20" fill="#172b4d" stroke="none" stroke-width="1"/>
+<text x="750" y="304" font-family="Segoe UI,Arial,sans-serif" font-size="16" font-weight="400" text-anchor="middle" fill="#cbd5e1">чётные</text>
+<text x="850" y="304" font-family="Segoe UI,Arial,sans-serif" font-size="16" font-weight="400" text-anchor="middle" fill="#cbd5e1">нечётные</text>
+<rect x="725" y="315" width="50" height="50" rx="7" fill="#ffffff" stroke="#b42335" stroke-width="3"/>
+<text x="750" y="349" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="middle" fill="#b42335">2</text>
+<rect x="62" y="312" width="618" height="56" rx="10" fill="#ffffff" stroke="none" stroke-width="1"/>
+<path d="M655 340 L723 340" stroke="#b42335" stroke-width="3"/>
+<text x="80" y="348" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="start" fill="#b42335">+5 V</text>
+<text x="525" y="348" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="700" text-anchor="start" fill="#b42335">5V</text>
+<rect x="825" y="315" width="50" height="50" rx="7" fill="#ffffff" stroke="#ad6700" stroke-width="3"/>
+<text x="850" y="349" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="middle" fill="#ad6700">1</text>
+<rect x="924" y="312" width="614" height="56" rx="10" fill="#ffffff" stroke="none" stroke-width="1"/>
+<path d="M877 340 L949 340" stroke="#ad6700" stroke-width="3"/>
+<text x="975" y="348" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="start" fill="#ad6700">3V3 *</text>
+<text x="1375" y="348" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="700" text-anchor="start" fill="#ad6700">—</text>
+<rect x="725" y="383" width="50" height="50" rx="7" fill="#ffffff" stroke="#b42335" stroke-width="3"/>
+<text x="750" y="417" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="middle" fill="#b42335">4</text>
+<rect x="62" y="380" width="618" height="56" rx="10" fill="#ffffff" stroke="none" stroke-width="1"/>
+<path d="M655 408 L723 408" stroke="#b42335" stroke-width="3"/>
+<text x="80" y="416" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="start" fill="#b42335">+5 V</text>
+<text x="525" y="416" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="700" text-anchor="start" fill="#b42335">5V</text>
+<rect x="825" y="383" width="50" height="50" rx="7" fill="#ffffff" stroke="#8a94a6" stroke-width="3"/>
+<text x="850" y="417" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="middle" fill="#8a94a6">3</text>
+<rect x="924" y="380" width="614" height="56" rx="10" fill="#ffffff" stroke="none" stroke-width="1"/>
+<path d="M877 408 L949 408" stroke="#8a94a6" stroke-width="3"/>
+<text x="975" y="416" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="start" fill="#8a94a6">NC</text>
+<text x="1375" y="416" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="700" text-anchor="start" fill="#8a94a6">—</text>
+<rect x="725" y="451" width="50" height="50" rx="7" fill="#ffffff" stroke="#344054" stroke-width="3"/>
+<text x="750" y="485" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="middle" fill="#344054">6</text>
+<rect x="62" y="448" width="618" height="56" rx="10" fill="#ffffff" stroke="none" stroke-width="1"/>
+<path d="M655 476 L723 476" stroke="#344054" stroke-width="3"/>
+<text x="80" y="484" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="start" fill="#344054">GND</text>
+<text x="525" y="484" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="700" text-anchor="start" fill="#344054">GND</text>
+<rect x="825" y="451" width="50" height="50" rx="7" fill="#ffffff" stroke="#8a94a6" stroke-width="3"/>
+<text x="850" y="485" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="middle" fill="#8a94a6">5</text>
+<rect x="924" y="448" width="614" height="56" rx="10" fill="#ffffff" stroke="none" stroke-width="1"/>
+<path d="M877 476 L949 476" stroke="#8a94a6" stroke-width="3"/>
+<text x="975" y="484" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="start" fill="#8a94a6">NC</text>
+<text x="1375" y="484" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="700" text-anchor="start" fill="#8a94a6">—</text>
+<rect x="725" y="519" width="50" height="50" rx="7" fill="#ffffff" stroke="#8a94a6" stroke-width="3"/>
+<text x="750" y="553" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="middle" fill="#8a94a6">8</text>
+<rect x="62" y="516" width="618" height="56" rx="10" fill="#ffffff" stroke="none" stroke-width="1"/>
+<path d="M655 544 L723 544" stroke="#8a94a6" stroke-width="3"/>
+<text x="80" y="552" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="start" fill="#8a94a6">NC</text>
+<text x="525" y="552" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="700" text-anchor="start" fill="#8a94a6">—</text>
+<rect x="825" y="519" width="50" height="50" rx="7" fill="#ffffff" stroke="#8a94a6" stroke-width="3"/>
+<text x="850" y="553" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="middle" fill="#8a94a6">7</text>
+<rect x="924" y="516" width="614" height="56" rx="10" fill="#ffffff" stroke="none" stroke-width="1"/>
+<path d="M877 544 L949 544" stroke="#8a94a6" stroke-width="3"/>
+<text x="975" y="552" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="start" fill="#8a94a6">NC</text>
+<text x="1375" y="552" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="700" text-anchor="start" fill="#8a94a6">—</text>
+<rect x="725" y="587" width="50" height="50" rx="7" fill="#ffffff" stroke="#8a94a6" stroke-width="3"/>
+<text x="750" y="621" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="middle" fill="#8a94a6">10</text>
+<rect x="62" y="584" width="618" height="56" rx="10" fill="#ffffff" stroke="none" stroke-width="1"/>
+<path d="M655 612 L723 612" stroke="#8a94a6" stroke-width="3"/>
+<text x="80" y="620" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="start" fill="#8a94a6">NC</text>
+<text x="525" y="620" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="700" text-anchor="start" fill="#8a94a6">—</text>
+<rect x="825" y="587" width="50" height="50" rx="7" fill="#ffffff" stroke="#344054" stroke-width="3"/>
+<text x="850" y="621" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="middle" fill="#344054">9</text>
+<rect x="924" y="584" width="614" height="56" rx="10" fill="#ffffff" stroke="none" stroke-width="1"/>
+<path d="M877 612 L949 612" stroke="#344054" stroke-width="3"/>
+<text x="975" y="620" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="start" fill="#344054">GND</text>
+<text x="1375" y="620" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="700" text-anchor="start" fill="#344054">GND</text>
+<rect x="725" y="655" width="50" height="50" rx="7" fill="#ffffff" stroke="#8a94a6" stroke-width="3"/>
+<text x="750" y="689" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="middle" fill="#8a94a6">12</text>
+<rect x="62" y="652" width="618" height="56" rx="10" fill="#ffffff" stroke="none" stroke-width="1"/>
+<path d="M655 680 L723 680" stroke="#8a94a6" stroke-width="3"/>
+<text x="80" y="688" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="start" fill="#8a94a6">NC</text>
+<text x="525" y="688" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="700" text-anchor="start" fill="#8a94a6">—</text>
+<rect x="825" y="655" width="50" height="50" rx="7" fill="#ffffff" stroke="#7c3aed" stroke-width="3"/>
+<text x="850" y="689" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="middle" fill="#7c3aed">11</text>
+<rect x="924" y="652" width="614" height="56" rx="10" fill="#ffffff" stroke="none" stroke-width="1"/>
+<path d="M877 680 L949 680" stroke="#7c3aed" stroke-width="3"/>
+<text x="975" y="688" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="start" fill="#7c3aed">TP_IRQ / PENIRQ</text>
+<text x="1375" y="688" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="700" text-anchor="start" fill="#7c3aed">PB10</text>
+<rect x="725" y="723" width="50" height="50" rx="7" fill="#ffffff" stroke="#344054" stroke-width="3"/>
+<text x="750" y="757" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="middle" fill="#344054">14</text>
+<rect x="62" y="720" width="618" height="56" rx="10" fill="#ffffff" stroke="none" stroke-width="1"/>
+<path d="M655 748 L723 748" stroke="#344054" stroke-width="3"/>
+<text x="80" y="756" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="start" fill="#344054">GND</text>
+<text x="525" y="756" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="700" text-anchor="start" fill="#344054">GND</text>
+<rect x="825" y="723" width="50" height="50" rx="7" fill="#ffffff" stroke="#8a94a6" stroke-width="3"/>
+<text x="850" y="757" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="middle" fill="#8a94a6">13</text>
+<rect x="924" y="720" width="614" height="56" rx="10" fill="#ffffff" stroke="none" stroke-width="1"/>
+<path d="M877 748 L949 748" stroke="#8a94a6" stroke-width="3"/>
+<text x="975" y="756" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="start" fill="#8a94a6">NC</text>
+<text x="1375" y="756" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="700" text-anchor="start" fill="#8a94a6">—</text>
+<rect x="725" y="791" width="50" height="50" rx="7" fill="#ffffff" stroke="#8a94a6" stroke-width="3"/>
+<text x="750" y="825" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="middle" fill="#8a94a6">16</text>
+<rect x="62" y="788" width="618" height="56" rx="10" fill="#ffffff" stroke="none" stroke-width="1"/>
+<path d="M655 816 L723 816" stroke="#8a94a6" stroke-width="3"/>
+<text x="80" y="824" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="start" fill="#8a94a6">NC</text>
+<text x="525" y="824" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="700" text-anchor="start" fill="#8a94a6">—</text>
+<rect x="825" y="791" width="50" height="50" rx="7" fill="#ffffff" stroke="#8a94a6" stroke-width="3"/>
+<text x="850" y="825" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="middle" fill="#8a94a6">15</text>
+<rect x="924" y="788" width="614" height="56" rx="10" fill="#ffffff" stroke="none" stroke-width="1"/>
+<path d="M877 816 L949 816" stroke="#8a94a6" stroke-width="3"/>
+<text x="975" y="824" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="start" fill="#8a94a6">NC</text>
+<text x="1375" y="824" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="700" text-anchor="start" fill="#8a94a6">—</text>
+<rect x="725" y="859" width="50" height="50" rx="7" fill="#ffffff" stroke="#087f5b" stroke-width="3"/>
+<text x="750" y="893" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="middle" fill="#087f5b">18</text>
+<rect x="62" y="856" width="618" height="56" rx="10" fill="#ffffff" stroke="none" stroke-width="1"/>
+<path d="M655 884 L723 884" stroke="#087f5b" stroke-width="3"/>
+<text x="80" y="892" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="start" fill="#087f5b">DC / LCD_RS</text>
+<text x="525" y="892" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="700" text-anchor="start" fill="#087f5b">PB13</text>
+<rect x="825" y="859" width="50" height="50" rx="7" fill="#ffffff" stroke="#ad6700" stroke-width="3"/>
+<text x="850" y="893" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="middle" fill="#ad6700">17</text>
+<rect x="924" y="856" width="614" height="56" rx="10" fill="#ffffff" stroke="none" stroke-width="1"/>
+<path d="M877 884 L949 884" stroke="#ad6700" stroke-width="3"/>
+<text x="975" y="892" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="start" fill="#ad6700">3V3 *</text>
+<text x="1375" y="892" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="700" text-anchor="start" fill="#ad6700">—</text>
+<rect x="725" y="927" width="50" height="50" rx="7" fill="#ffffff" stroke="#344054" stroke-width="3"/>
+<text x="750" y="961" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="middle" fill="#344054">20</text>
+<rect x="62" y="924" width="618" height="56" rx="10" fill="#ffffff" stroke="none" stroke-width="1"/>
+<path d="M655 952 L723 952" stroke="#344054" stroke-width="3"/>
+<text x="80" y="960" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="start" fill="#344054">GND</text>
+<text x="525" y="960" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="700" text-anchor="start" fill="#344054">GND</text>
+<rect x="825" y="927" width="50" height="50" rx="7" fill="#ffffff" stroke="#1769c2" stroke-width="3"/>
+<text x="850" y="961" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="middle" fill="#1769c2">19</text>
+<rect x="924" y="924" width="614" height="56" rx="10" fill="#ffffff" stroke="none" stroke-width="1"/>
+<path d="M877 952 L949 952" stroke="#1769c2" stroke-width="3"/>
+<text x="975" y="960" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="start" fill="#1769c2">MOSI</text>
+<text x="1375" y="960" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="700" text-anchor="start" fill="#1769c2">PA7</text>
+<rect x="725" y="995" width="50" height="50" rx="7" fill="#ffffff" stroke="#087f5b" stroke-width="3"/>
+<text x="750" y="1029" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="middle" fill="#087f5b">22</text>
+<rect x="62" y="992" width="618" height="56" rx="10" fill="#ffffff" stroke="none" stroke-width="1"/>
+<path d="M655 1020 L723 1020" stroke="#087f5b" stroke-width="3"/>
+<text x="80" y="1028" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="start" fill="#087f5b">RST</text>
+<text x="525" y="1028" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="700" text-anchor="start" fill="#087f5b">PB12</text>
+<rect x="825" y="995" width="50" height="50" rx="7" fill="#ffffff" stroke="#1769c2" stroke-width="3"/>
+<text x="850" y="1029" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="middle" fill="#1769c2">21</text>
+<rect x="924" y="992" width="614" height="56" rx="10" fill="#ffffff" stroke="none" stroke-width="1"/>
+<path d="M877 1020 L949 1020" stroke="#1769c2" stroke-width="3"/>
+<text x="975" y="1028" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="start" fill="#1769c2">MISO</text>
+<text x="1375" y="1028" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="700" text-anchor="start" fill="#1769c2">PA6</text>
+<rect x="725" y="1063" width="50" height="50" rx="7" fill="#ffffff" stroke="#087f5b" stroke-width="3"/>
+<text x="750" y="1097" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="middle" fill="#087f5b">24</text>
+<rect x="62" y="1060" width="618" height="56" rx="10" fill="#ffffff" stroke="none" stroke-width="1"/>
+<path d="M655 1088 L723 1088" stroke="#087f5b" stroke-width="3"/>
+<text x="80" y="1096" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="start" fill="#087f5b">CS — дисплей</text>
+<text x="525" y="1096" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="700" text-anchor="start" fill="#087f5b">PB15</text>
+<rect x="825" y="1063" width="50" height="50" rx="7" fill="#ffffff" stroke="#1769c2" stroke-width="3"/>
+<text x="850" y="1097" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="middle" fill="#1769c2">23</text>
+<rect x="924" y="1060" width="614" height="56" rx="10" fill="#ffffff" stroke="none" stroke-width="1"/>
+<path d="M877 1088 L949 1088" stroke="#1769c2" stroke-width="3"/>
+<text x="975" y="1096" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="start" fill="#1769c2">SCK</text>
+<text x="1375" y="1096" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="700" text-anchor="start" fill="#1769c2">PA5</text>
+<rect x="725" y="1131" width="50" height="50" rx="7" fill="#ffffff" stroke="#087f5b" stroke-width="3"/>
+<text x="750" y="1165" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="middle" fill="#087f5b">26</text>
+<rect x="62" y="1128" width="618" height="56" rx="10" fill="#ffffff" stroke="none" stroke-width="1"/>
+<path d="M655 1156 L723 1156" stroke="#087f5b" stroke-width="3"/>
+<text x="80" y="1164" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="start" fill="#087f5b">T_CS — сенсор</text>
+<text x="525" y="1164" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="700" text-anchor="start" fill="#087f5b">PB14</text>
+<rect x="825" y="1131" width="50" height="50" rx="7" fill="#ffffff" stroke="#344054" stroke-width="3"/>
+<text x="850" y="1165" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="middle" fill="#344054">25</text>
+<rect x="924" y="1128" width="614" height="56" rx="10" fill="#ffffff" stroke="none" stroke-width="1"/>
+<path d="M877 1156 L949 1156" stroke="#344054" stroke-width="3"/>
+<text x="975" y="1164" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" text-anchor="start" fill="#344054">GND</text>
+<text x="1375" y="1164" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="700" text-anchor="start" fill="#344054">GND</text>
+<rect x="70" y="1245" width="16" height="16" rx="4" fill="#1769c2" stroke="none" stroke-width="1"/>
+<text x="95" y="1261" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="400" text-anchor="start" fill="#1769c2">SPI1</text>
+<rect x="230" y="1245" width="16" height="16" rx="4" fill="#087f5b" stroke="none" stroke-width="1"/>
+<text x="255" y="1261" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="400" text-anchor="start" fill="#087f5b">Обычный GPIO</text>
+<rect x="510" y="1245" width="16" height="16" rx="4" fill="#7c3aed" stroke="none" stroke-width="1"/>
+<text x="535" y="1261" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="400" text-anchor="start" fill="#7c3aed">Вход касания</text>
+<rect x="780" y="1245" width="16" height="16" rx="4" fill="#b42335" stroke="none" stroke-width="1"/>
+<text x="805" y="1261" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="400" text-anchor="start" fill="#b42335">Питание</text>
+<rect x="985" y="1245" width="16" height="16" rx="4" fill="#8a94a6" stroke="none" stroke-width="1"/>
+<text x="1010" y="1261" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="400" text-anchor="start" fill="#8a94a6">NC: не используется</text>
+<text x="70" y="1320" font-family="Segoe UI,Arial,sans-serif" font-size="24" font-weight="700" text-anchor="start" fill="#172b4d">TP_IRQ: при касании — низкий уровень; в проекте подключён к PB10.</text>
+<text x="70" y="1365" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="400" text-anchor="start" fill="#172b4d">* 3V3 (1, 17) указаны по типовой документации; здесь к Blue Pill не подключены.</text>
+<text x="70" y="1404" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="400" text-anchor="start" fill="#172b4d">Питание по твоему фото: +5 V и GND. GPIO STM32 работают с уровнями 3,3 V.</text>
+<text x="70" y="1452" font-family="Segoe UI,Arial,sans-serif" font-size="21" font-weight="400" text-anchor="start" fill="#667085">Типовая распиновка LCD Wiki. Для твоей платы не подтверждена: прозвонка GND не совпала.</text>
+<text x="70" y="1490" font-family="Segoe UI,Arial,sans-serif" font-size="21" font-weight="400" text-anchor="start" fill="#667085">Физические номера разъёма не равны номерам GPIO Raspberry Pi или STM32.</text>
+</svg>
