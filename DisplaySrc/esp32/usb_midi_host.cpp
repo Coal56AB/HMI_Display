@@ -27,13 +27,19 @@ void received(usb_transfer_t *transfer) {
     in_flight[index]=false;
     if(closing) return;
     if(transfer->status!=USB_TRANSFER_STATUS_COMPLETED || transfer->actual_num_bytes%4) {request_close();return;}
+    music::Event batch[16];
+    unsigned count=0;
+    const uint64_t timestamp=uint64_t(esp_timer_get_time());
     for(int i=0;i<transfer->actual_num_bytes;i+=4) {
         music::Event event;
-        if(music::decode_usb(transfer->data_buffer+i,uint64_t(esp_timer_get_time()),event)) {
+        if(music::decode_usb(transfer->data_buffer+i,timestamp,event)) {
             if(MIDI_DEBUG_ENABLED && event.type==music::Type::On) gpio_set_level(gpio_num_t(MIDI_DEBUG_PIN),debug_level^=1);
-            sink(event);
+            batch[count++]=event;
         }
     }
+    // Preserve wire order, but publish only the final state of this USB transfer.
+    // The endpoint scanner limits transfers to 64 bytes (16 MIDI events).
+    for(unsigned i=0;i<count;++i) {batch[i].batch_end=i+1==count;sink(batch[i]);}
     if(usb_host_transfer_submit(transfer)==ESP_OK) in_flight[index]=true;
     else request_close();
 }

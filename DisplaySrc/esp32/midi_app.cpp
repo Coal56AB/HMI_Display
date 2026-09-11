@@ -47,32 +47,37 @@ void musical_task(void *) {
     uint32_t generation = 0;
     int64_t last_sent = 0;
     bool pending = true;
+    bool batch_open = false;
     for (;;) {
         const uint32_t now = uint32_t(esp_timer_get_time() / 1000);
         const uint32_t new_generation = connection_generation.load();
         if (generation != new_generation) {
             generation = new_generation; controller.connection(usb_connected.load());
+            batch_open = false;
             pending = true;
         }
         if (input_overflow.exchange(false)) {
-            xQueueReset(events); controller.overflow(); counters.input_overflows++; pending = true;
+            xQueueReset(events); controller.overflow(); counters.input_overflows++; pending = true; batch_open = false;
         }
         Action action;
         while (xQueueReceive(actions, &action, 0) == pdTRUE) {
             bool reset_input = false;
             const Reply reply{action.sequence, controller.action(action.sequence, action.command, action.motor, action.value, now, &reset_input)};
             // A retry must not discard a fresh Note Off and leave the note sounding.
-            if (reset_input) xQueueReset(events);
+            if (reset_input) {xQueueReset(events); batch_open = false;}
             xQueueSend(replies, &reply, 0); pending = true;
         }
         Input input;
         if (xQueueReceive(events, &input, 0) == pdTRUE) {
             const int64_t begin = esp_timer_get_time();
-            if (input.generation == generation) controller.event(input.event);
+            if (input.generation == generation) {
+                controller.event(input.event);
+                batch_open = !input.event.batch_end;
+            }
             const uint32_t elapsed = uint32_t(esp_timer_get_time() - begin);
             if (elapsed > counters.max_process_us) counters.max_process_us = elapsed;
         }
-        const auto next = controller.output();
+        const auto next = batch_open ? current : controller.output();
         if (!(next == current)) { current = next; pending = true; }
         const int64_t us = esp_timer_get_time();
         if (usb_connected.load() && us - last_sent >= NS_HEARTBEAT_MS * 1000) pending = true;

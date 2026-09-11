@@ -32,6 +32,7 @@ bool Link::select(uint32_t now) {
         uint8_t bytes[32], payload[7]{};
         for (unsigned i = 0; i < 4; ++i) payload[i] = uint8_t(input.clock >> (i * 8));
         ui(bytes, encode(bytes, 0x43, payload, 4));
+        ui(bytes, encode(bytes, 0x44, input.range, 2));
         ui(input.state, 57);
         if (input.title_length) ui(input.title, input.title_length);
         // Reconstruct held notes when taking over; inactive transport history is not replayed.
@@ -52,6 +53,9 @@ void Link::frame(Source source, const uint8_t *bytes, unsigned count, uint32_t n
     if (command == 0x40 && length == 50 && state_valid(bytes + 5)) {
         memcpy(input.state, bytes, count); input.last_state = now; input.alive = true;
         if (!select(now) && selected == source) ui(bytes, count);
+    } else if (command == 0x44 && length == 2) {
+        memcpy(input.range, bytes + 5, 2);
+        if (selected == source) ui(bytes, count);
     } else if (command == 0x41 && length <= 48) {
         memcpy(input.title, bytes, count); input.title_length = count;
         if (selected == source) ui(bytes, count);

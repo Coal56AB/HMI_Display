@@ -5,6 +5,7 @@
 #include "driver/spi_master.h"
 #include "esp_heap_caps.h"
 #include "esp_partition.h"
+#include "esp_flash.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -125,7 +126,7 @@ uint32_t now_ms() { return uint32_t(esp_timer_get_time() / 1000); }
 const DisplayPlatform hmi_platform = {DISPLAY_API_VERSION, 480, 320, write_rect, read_assets,
     read_flash, write_flash, erase_flash, now_ms, hmi_module_send, esp_restart, nullptr};
 
-void hmi_boot_status(const char *label, unsigned percent) {
+void hmi_boot_status(const char *label, unsigned percent, unsigned dwell_ms) {
     static bool painted=false;
     static const char letters[]="ABCDEFGHIJKLMNOPQRSTUVWXYZ";
     static const uint8_t glyphs[][5]={
@@ -158,7 +159,7 @@ void hmi_boot_status(const char *label, unsigned percent) {
     }
     painted=true;
     damage.invalidate(0,0,480,320);
-    vTaskDelay(pdMS_TO_TICKS(200));
+    if (dwell_ms) vTaskDelay(pdMS_TO_TICKS(dwell_ms));
 }
 void hmi_lcd_init() {
     output(HMI_LCD_CS); output(HMI_LCD_DC); output(HMI_LCD_RST); output(HMI_TOUCH_CS);
@@ -196,6 +197,19 @@ void hmi_board_init() {
     storage=esp_partition_find_first(ESP_PARTITION_TYPE_DATA,ESP_PARTITION_SUBTYPE_ANY,"hmi_store");
     if(!storage)hmi_boot_status("STORAGE ERROR",25);
     configASSERT(storage);
+    // The expanded song partition keeps all five old song blocks in place.
+    // Move the old UI settings before that former settings sector is reused.
+    constexpr uint32_t settings = 0xdf000, legacy_settings = 0x30f000;
+    uint8_t current[8], legacy[8];
+    if (display_module.assets_size == 0 && storage->size == 0xe0000 &&
+        esp_partition_read(storage, settings, current, sizeof(current)) == ESP_OK &&
+        std::all_of(current, current + sizeof(current), [](uint8_t b){return b == 255;}) &&
+        esp_flash_read(nullptr, legacy, legacy_settings, sizeof(legacy)) == ESP_OK &&
+        legacy[0] == 'M' && legacy[1] == 'B' && legacy[2] == 1) {
+        // The UI validates the settings CRC before applying them.
+        ESP_ERROR_CHECK(esp_partition_erase_range(storage, settings, 4096));
+        ESP_ERROR_CHECK(esp_partition_write(storage, settings, legacy, sizeof(legacy)));
+    }
 }
 void hmi_touch_poll(uint32_t now) {
     if (now - last_touch < HMI_TOUCH_POLL_MS) return;

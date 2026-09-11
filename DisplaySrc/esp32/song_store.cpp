@@ -10,13 +10,14 @@
 #include "freertos/task.h"
 #include <cstring>
 #include <cstdio>
+#include <cmath>
 
 namespace {
 constexpr uint32_t magic=0x31474e53;
 struct Header { uint32_t magic,generation,slot,count,duration,crc;uint8_t mask,raw,dirs,reserved;char title[32];uint32_t check; };
 static_assert(sizeof(Header)==64,"Disk header");
 const esp_partition_t *partition;
-Header catalog[4]{};int physical[4]={-1,-1,-1,-1};
+Header catalog[SONG_SLOT_COUNT]{};int physical[SONG_SLOT_COUNT];
 struct Request { uint8_t seq,len,data[192]; };
 struct Reply { uint8_t seq,data[8]; };
 QueueHandle_t requests,replies;
@@ -34,19 +35,22 @@ uint8_t rpc[208],rpc_length=0,rpc_seq=0,rpc_command=0;unsigned rpc_count=0,rpc_t
 bool started=false,seek_ready=true,rpc_resume=false;
 uint32_t play_offset=0,seek_notes[6]{};
 uint8_t resume_events[60];unsigned resume_count=0,resume_index=0;
+unsigned range_index=0;
+uint8_t range_low=255,range_high=0;
+bool range_ready=false;
 
 uint32_t read32(const uint8_t*p){return song_u32(p);}
 uint32_t checksum(const void*p,unsigned n){return ~song_crc(0xffffffffu,(const uint8_t*)p,n);}
-bool valid(const Header &h) {return h.magic==magic&&h.slot<4&&h.count>0&&h.count<=SONG_MAX_EVENTS&&h.check==checksum(&h,60);}
+bool valid(const Header &h) {return h.magic==magic&&h.slot<SONG_SLOT_COUNT&&h.count>0&&h.count<=SONG_MAX_EVENTS&&h.check==checksum(&h,60);}
 void refresh() {
     memset(catalog,0,sizeof(catalog));for(auto &p:physical)p=-1;
     if(!partition)return;
-    for(int i=0;i<5;i++) {Header h{};
+    for(unsigned i=0;i<SONG_SLOT_COUNT+1;i++) {Header h{};
         if(esp_partition_read(partition,i*SONG_SLOT_BYTES,&h,sizeof(h))==ESP_OK&&valid(h)&&
             (physical[h.slot]<0||h.generation>catalog[h.slot].generation)) {catalog[h.slot]=h;physical[h.slot]=i;}
     }
 }
-void show_catalog() {for(unsigned i=0;i<4;i++)music_box_saved_song(i,catalog[i].title,physical[i]>=0,catalog[i].duration);}
+void show_catalog() {for(unsigned i=0;i<SONG_SLOT_COUNT;i++)music_box_saved_song(i,catalog[i].title,physical[i]>=0,catalog[i].duration);}
 void report(const Request &r,uint8_t error,uint8_t stage,uint8_t percent,uint32_t offset) {
     Reply reply{};reply.seq=r.seq;reply.data[0]=r.data[0];reply.data[1]=error;
     reply.data[2]=stage;reply.data[3]=percent;song_put32(reply.data+4,offset);
@@ -61,13 +65,13 @@ void worker(void*) {
         if(!partition)error=4;
         else if(r.data[0]==SONG_BEGIN) {
             target=-1;offset=0;ended=false;last_at=0;
-            if(n!=48||p[0]>=4||!read32(p+1)||read32(p+1)>SONG_MAX_EVENTS||!p[13]||p[13]>63||p[14]>7||p[15]>63)error=3;
+            if(n!=48||p[0]>=SONG_SLOT_COUNT||!read32(p+1)||read32(p+1)>SONG_MAX_EVENTS||!p[13]||p[13]>63||p[14]>7||p[15]>63)error=3;
             else {
                 refresh();incoming={};incoming.magic=magic;incoming.slot=p[0];incoming.count=read32(p+1);
                 incoming.duration=read32(p+5);incoming.crc=read32(p+9);incoming.mask=p[13];incoming.raw=p[14];incoming.dirs=p[15];
                 memcpy(incoming.title,p+16,32);incoming.title[31]=0;incoming.generation=1;
                 for(const auto &h:catalog)if(h.generation>=incoming.generation)incoming.generation=h.generation+1;
-                for(int i=0;i<5;i++){bool used=false;for(int j:physical)if(i==j)used=true;if(!used){target=i;break;}}
+                for(unsigned i=0;i<SONG_SLOT_COUNT+1;i++){bool used=false;for(int j:physical)if((int)i==j)used=true;if(!used){target=(int)i;break;}}
                 total=incoming.count*10;
                 report(r,255,1,1,0);
                 if(target<0)error=5;
@@ -168,7 +172,7 @@ void on_frame(const uint8_t*b,unsigned n) {
 }
 void song_store_start() {
     partition=esp_partition_find_first(ESP_PARTITION_TYPE_DATA,ESP_PARTITION_SUBTYPE_ANY,"songs");
-    if(partition&&partition->size<5*SONG_SLOT_BYTES)partition=nullptr;
+    if(partition&&partition->size<(SONG_SLOT_COUNT+1)*SONG_SLOT_BYTES)partition=nullptr;
     refresh();requests=xQueueCreate(1,sizeof(Request));replies=xQueueCreate(8,sizeof(Reply));
     configASSERT(requests&&replies);configASSERT(xTaskCreate(worker,"song-store",4096,nullptr,2,nullptr)==pdPASS);
 }
@@ -177,7 +181,7 @@ void song_store_boot(bool ready,bool pc_connected) {
     if(boot_done||!ready||!music_box_screen_ready())return;
     boot_done=true;
     if(pc_connected||request_busy)return;
-    boot_testing=true;boot_started=0;command(21);
+    boot_testing=true;boot_started=0;music_box_save_progress(5,0);command(21);
 }
 bool song_store_action(unsigned action,unsigned slot,uint32_t position) {
     if(action==0&&(playing||boot_testing)){boot_testing=false;stop();return true;}
@@ -185,8 +189,9 @@ bool song_store_action(unsigned action,unsigned slot,uint32_t position) {
     if(action!=20&&!seeking)return false;
     if(playing&&!seeking){stop();return true;}
     if(seeking)slot=selected;
-    if(slot>=4||physical[slot]<0||upload_open||boot_testing)return true;
+    if(slot>=SONG_SLOT_COUNT||physical[slot]<0||upload_open||boot_testing)return true;
     selected=slot;playing=true;started=false;event_index=setup_step=0;free_events=256;rpc_length=0;poll_at=0;
+    if(!seeking){range_index=0;range_low=255;range_high=0;range_ready=false;music_box_saved_range(255,255);}
     play_offset=seeking?position:0;
     if(catalog[slot].duration&&play_offset>=catalog[slot].duration)play_offset=catalog[slot].duration-1;
     seek_ready=play_offset==0;resume_count=resume_index=0;memset(seek_notes,0,sizeof(seek_notes));
@@ -237,6 +242,22 @@ void song_store_tick(uint32_t now) {
     }
     if(!playing)return;
     const auto &h=catalog[selected];uint8_t p[180]{};
+    if(!range_ready && setup_step>0) {
+        // Inspect the entire stored song before playback, in bounded UI-friendly blocks.
+        uint8_t scan[640];unsigned count=h.count-range_index;if(count>64)count=64;
+        if(esp_partition_read(partition,physical[selected]*SONG_SLOT_BYTES+SONG_DATA_OFFSET+range_index*10,scan,count*10)!=ESP_OK){stop();music_box_playback_error("Ошибка чтения памяти");return;}
+        for(unsigned i=0;i<count;++i)if(scan[i*10+5]==1) {
+            uint32_t frequency=read32(scan+i*10+6);
+            if(frequency) {
+                int note=(int)lroundf(69.0f+12.0f*log2f(frequency/440000.0f));
+                if(note>=0&&note<128){if(note<range_low)range_low=note;if(note>range_high)range_high=note;}
+            }
+        }
+        range_index+=count;
+        if(range_index==h.count){range_ready=true;music_box_saved_range(range_low,range_high);}
+        if(now-poll_at>=100){poll_at=now;command(3);}
+        return;
+    }
     if(setup_step<18) {
         unsigned s=setup_step++;
         if(s==0)command(4);

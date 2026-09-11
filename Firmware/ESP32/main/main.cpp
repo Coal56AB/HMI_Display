@@ -4,7 +4,7 @@
 #include "esp_log.h"
 #include "esp_system.h"
 
-void __attribute__((weak)) hmi_module_start() {}
+bool __attribute__((weak)) hmi_module_start() { return true; }
 void __attribute__((weak)) hmi_module_tick(uint32_t) {}
 void __attribute__((weak)) hmi_module_send(const uint8_t *, uint16_t) {}
 
@@ -18,9 +18,15 @@ static void ui_task(void *) {
         vTaskDelete(nullptr);
         return;
     }
-    hmi_module_start();
-    hmi_boot_status("INTERFACE",95);
+    if (!hmi_module_start()) {
+        ESP_LOGE("hmi", "Startup stopped: internal controller exchange failed");
+        vTaskDelete(nullptr);
+        return;
+    }
+    // Hand over promptly to the regular heartbeat after the link check.
+    hmi_boot_status("INTERFACE",95,0);
     display_init(&hmi_platform);
+    hmi_boot_status("READY",100,0);
     hmi_touch_poll(hmi_platform.now_ms());
     ESP_LOGI("hmi", "LCD/touch ready; free heap: %lu", (unsigned long)esp_get_free_heap_size());
     uint32_t previous_loop = hmi_platform.now_ms();

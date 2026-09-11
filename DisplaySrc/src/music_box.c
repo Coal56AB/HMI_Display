@@ -16,7 +16,8 @@
 #define RED RGB(184, 62, 81)
 #define GREEN RGB(80, 210, 173)
 #define WHITE 0xffff
-#define SETTINGS_ADDR 0x1ff000u
+#define SETTINGS_ADDR 0x0df000u
+#define SAVED_SONG_COUNT 10u
 #define RX_SIZE 512u
 #define NOTES 96u
 #define DIRTY 32u
@@ -62,6 +63,9 @@ static const uint8_t widths[3] = {25, 50, 100};
 static uint32_t position, duration, now, last_state, last_paint, midi_now,
     last_midi_draw;
 static uint8_t midi_dirty;
+static uint32_t midi_source_time;
+static uint32_t midi_tail_ms;
+static uint8_t midi_source_valid, midi_stop_latched, midi_input_running;
 static uint8_t have_state;
 static char title[49] = "Нет композиции", notice[48];
 static uint32_t notice_until;
@@ -104,16 +108,20 @@ static int16_t down_x, down_y;
 static uint8_t numeric;
 static char digits[9];
 static uint8_t fresh_digits;
+static uint8_t input_note = 69;
+static const uint8_t natural_pitches[7] = {0,2,4,5,7,9,11};
+static const char *natural_names[7] = {"C","D","E","F","G","A","B"};
 static uint8_t settings_dirty;
 static uint32_t settings_at;
 #if MUSIC_BOX_CONTROLLER
 static unsigned controller_source;
 static unsigned connection_status;
-static char saved_titles[4][32];
+static char saved_titles[SAVED_SONG_COUNT][32];
 static char playback_error[128];
 static uint8_t initial_render_done;
-static uint32_t saved_durations[4],saved_offset;
-static uint8_t saved_present[4],saved_selected,saved_playing,save_stage,save_percent;
+static uint32_t saved_durations[SAVED_SONG_COUNT],saved_offset;
+static uint8_t saved_present[SAVED_SONG_COUNT],saved_selected,saved_playing,save_stage,save_percent;
+static uint8_t pc_range[2]={255,255},saved_range[2]={255,255};
 static unsigned pc_song_visible(void) {return (flags&16)&&duration&&!saved_playing;}
 #endif
 const DisplayModule display_module = {DISPLAY_API_VERSION, 0, 0, 0, 0};
@@ -227,7 +235,13 @@ static void text(int x, int y, const char *s, uint16_t color, int scale) {
   if (y >= clip.y + clip.h || y + 16 * scale <= clip.y)
     return;
   while (*s && x < 480) {
-    g = glyph(utf8(&s));
+    uint32_t code = utf8(&s);
+    if (code == 0x2022) {
+      fill(x + 3 * scale, y + 6 * scale, 3 * scale, 3 * scale, color);
+      x += 9 * scale;
+      continue;
+    }
+    g = glyph(code);
     for (yy = 0; yy < 16; yy++)
       for (xx = 0; xx < 9; xx++)
         if (font_rows[g][yy] & (1u << xx))
@@ -253,6 +267,21 @@ static int textlen(const char *s) {
   }
   return n;
 }
+void music_box_boot_error(const DisplayPlatform *platform) {
+  /* Reuse the Cyrillic font and strip buffer without initializing the app. */
+  const char *first = "Ошибка внутреннего обмена.";
+  const char *second = "Попробуйте перезапустить плату";
+  p = platform;
+  dirty_count = 0;
+  for (int y = 0; y < 320; y += BAND) {
+    int height = y + BAND > 320 ? 320 - y : BAND;
+    clip = (Rect){0, (int16_t)y, 480, (int16_t)height};
+    fill(0, y, 480, height, BG);
+    text((480 - textlen(first) * 9) / 2, 136, first, TEXT, 1);
+    text((480 - textlen(second) * 9) / 2, 168, second, TEXT, 1);
+    p->write_rect(0, (uint16_t)y, 480, (uint16_t)height, pixels, 480, 0);
+  }
+}
 static void button(int x, int y, int w, int h, const char *s, uint16_t c) {
   fill(x, y, w, h, c);
   fill(x, y, w, 1, MUTED);
@@ -273,10 +302,45 @@ static void note_text(char *s, uint8_t n) {
   else
     snprintf(s, 16, "%s%d", names[n % 12], (int)n / 12 - 1);
 }
+static uint32_t note_frequency(unsigned note) {
+  static const uint32_t base[12] = {261626,277183,293665,311127,329628,349228,
+                                   369994,391995,415305,440000,466164,493883};
+  int octave = (int)note / 12 - 5;
+  return octave >= 0 ? base[note % 12] << octave : base[note % 12] >> -octave;
+}
+static unsigned motor_note(const Motor *m) {
+  unsigned best = 16;
+  uint32_t distance = UINT32_MAX;
+  for (unsigned n = 16; n <= 107; ++n) {
+    uint32_t f = note_frequency(n);
+    uint32_t d = f > m->mhz ? f - m->mhz : m->mhz - f;
+    if (d < distance) { best = n; distance = d; }
+  }
+  return best;
+}
 static int bar_height(const Motor *m) {
   uint32_t f = m->mhz;
   unsigned octave = 0, frac;
   if (!(m->flags & 2) && (m->flags & 24) != 24) return 0;
+#if MUSIC_BOX_CONTROLLER
+  if (save_stage == 5 || saved_playing || ((flags & 32) && pc_song_visible())) {
+    /* Same test chord as STM32 engine_boot_test, limited to installed motors. */
+    static const uint8_t test_notes[6] = {48,52,55,60,64,67};
+    uint8_t test_range[2] = {127,0};
+    for (unsigned i=0; i<6; ++i) if (mask & (1u<<i)) {
+      if (test_notes[i]<test_range[0]) test_range[0]=test_notes[i];
+      if (test_notes[i]>test_range[1]) test_range[1]=test_notes[i];
+    }
+    const uint8_t *range = save_stage == 5 ? test_range : saved_playing ? saved_range : pc_range;
+    if (range[0] <= range[1] && range[1] < 128 && m->note < 128) {
+      int span = range[1] - range[0], note = (int)m->note - range[0];
+      if (!span) return 92;
+      if (note < 0) note = 0;
+      if (note > span) note = span;
+      return (92 * (span + 9 * note) + 5 * span) / (10 * span);
+    }
+  }
+#endif
   if (f < 20000)
     return 0;
   if (f >= 1200000)
@@ -327,6 +391,35 @@ static void notification(const char *s) {
   notice_until = now + 2000;
   invalidate(0, 28, 480, 26);
 }
+static int midi_timeline_running(void) {
+  if (midi_stop_latched) return 0;
+#if MUSIC_BOX_CONTROLLER
+  if (midi_input_running) return 1;
+#else
+  if ((flags & 8) && !(flags & 4)) return 1;
+#endif
+  return have_state && (flags & 1) && !(flags & 4) && !sleeping && !resetting && (flags & (2|64));
+}
+static void midi_close_notes(void) {
+  for (unsigned i=0;i<NOTES;++i) if(notes[i].used&&notes[i].open) {
+    notes[i].end=midi_now;notes[i].open=0;midi_dirty=1;
+  }
+}
+static void midi_clock_update(uint32_t at, int running) {
+  if (midi_stop_latched || (!running && (flags & 4))) midi_tail_ms=0;
+  if (midi_source_valid) {
+    int32_t delta=(int32_t)(at-midi_source_time);
+    if (delta<0) {
+      memset(notes,0,sizeof(notes));note_next=0;midi_dirty=1;midi_tail_ms=0;
+    } else if (running && delta) { midi_now+=(uint32_t)delta;midi_dirty=1; }
+    else if (delta && midi_tail_ms) {
+      uint32_t advance=(uint32_t)delta<midi_tail_ms?(uint32_t)delta:midi_tail_ms;
+      midi_now+=advance;midi_tail_ms-=advance;midi_dirty=1;
+    }
+  }
+  if(running)midi_tail_ms=1000;
+  midi_source_time=at;midi_source_valid=1;
+}
 static void send_action(uint8_t action, uint8_t motor, uint32_t value) {
   uint16_t crc;
   if (pending && action != 0) {
@@ -338,6 +431,8 @@ static void send_action(uint8_t action, uint8_t motor, uint32_t value) {
     return;
   }
   action_packet[0] = 0xa5;
+  if(action==0) {midi_stop_latched=1;midi_tail_ms=0;midi_close_notes();}
+  else if((action==5&&value)||action==20||(action==1&&!(flags&2)))midi_stop_latched=0;
   action_packet[1] = 0x5a;
   action_packet[2] = 6;
   action_packet[3] = ++seq;
@@ -435,7 +530,7 @@ static void draw_motor(void) {
   fill(8, 90, 160, 104, PANEL);
   motor_icon(18, 121, 40, ((m->flags & 2) || (m->flags & 24) == 24) ? BLUE : MOTOR_OFF);
   text(69, 94, "Нота", MUTED, 1);
-  note_text(s, m->note);
+  note_text(s, m->note < 128 ? m->note : motor_note(m));
   text(69, 112, s, TEXT, 2);
 #if MUSIC_BOX_LIVE
   text(17, 169, (m->flags & 2) ? "Нота отправлена" : "Нет ноты", MUTED, 1);
@@ -454,10 +549,12 @@ static void draw_motor(void) {
   button(8, 202, 160, 48, (m->flags & 1) ? "EN ВКЛ" : "EN ВЫКЛ",
          (m->flags & 1) ? RGB(36, 76, 72) : BTN);
   button(176, 90, 50, 48, "-", BTN);
-  snprintf(s, sizeof(s), "%lu.%02lu Гц", (unsigned long)(m->mhz / 1000),
-           (unsigned long)((m->mhz % 1000) / 10));
+  if (show_hz)
+    snprintf(s, sizeof(s), "%lu.%02lu Гц", (unsigned long)(m->mhz / 1000),
+             (unsigned long)((m->mhz % 1000) / 10));
+  else note_text(s, motor_note(m));
   button(232, 90, 184, 48, "", BTN);
-  text(240, 94, "Частота", MUTED, 1);
+  text(240, 94, show_hz ? "Частота" : "Нота", MUTED, 1);
   text(240, 114, s, TEXT, 1);
   button(422, 90, 50, 48, "+", BTN);
   button(176, 146, 296, 48,
@@ -469,12 +566,12 @@ static void draw_motor(void) {
 static void draw_song(void) {
 #if MUSIC_BOX_CONTROLLER
   char s[48],time[16];
-  snprintf(s,sizeof(s),"Мелодия %u / 4",saved_selected+1);
+  snprintf(s,sizeof(s),"Мелодия %u / %u",saved_selected+1,SAVED_SONG_COUNT);
   text(170,42,s,MUTED,1);
   button(8,70,56,60,"<",BTN);button(416,70,56,60,">",BTN);
   text(76,82,saved_present[saved_selected]?saved_titles[saved_selected]:"Пустое место",TEXT,1);
   time_text(time,saved_durations[saved_selected]);text(76,112,time,MUTED,1);
-  text(16,155,"Сохранить: MusicMotor Studio",MUTED,1);
+  text(16,155,"Сохранить через MotorMusic Studio",MUTED,1);
   text(16,214,"Запуск: Обзор - Пуск",MUTED,1);
 #else
 #if MUSIC_BOX_LIVE
@@ -600,11 +697,32 @@ static void draw_numeric(void) {
   static const char *keys[] = {"1", "2", "3", "4", "5", "6",
                                "7", "8", "9", ".", "0", "<"};
   fill(0, 28, 480, 236, BG);
-  text(8, 40, "Частота, Гц", MUTED, 1);
+  text(8, 40, show_hz ? "Частота, Гц" : "Нота", MUTED, 1);
   button(130, 32, 48, 48, "X", BTN);
   fill(8, 97, 170, 52, PANEL);
-  text(14, 115, digits, TEXT, 1);
   button(8, 204, 170, 48, "Применить", RGB(70, 142, 232));
+  if (!show_hz) {
+    char label[16];
+    unsigned pitch=input_note%12;
+    note_text(label,input_note);text(20,106,label,TEXT,2);
+    text(8,165,"Диапазон E0..B7",MUTED,1);
+    for(i=0;i<7;++i) {
+      unsigned base=natural_pitches[i];
+      int chosen=pitch==base || (base!=4 && base!=11 && pitch==base+1);
+      button(190+(int)(i%3)*94,32+(int)(i/3)*56,88,50,natural_names[i],chosen?BLUE:BTN);
+    }
+    int sharp=pitch==1||pitch==3||pitch==6||pitch==8||pitch==10;
+    if(pitch==4||pitch==11) {
+      fill(284,144,88,50,RGB(40,40,40));
+      text(323,161,"#",RGB(96,96,96),1);
+    } else button(284,144,88,50,"#",sharp?BLUE:BTN);
+    button(190,200,88,50,"-",BTN);
+    snprintf(label,sizeof(label),"Окт. %d",(int)input_note/12-1);
+    text(292,217,label,TEXT,1);
+    button(378,200,88,50,"+",BTN);
+    return;
+  }
+  text(14, 115, digits, TEXT, 1);
   for (i = 0; i < 12; i++)
     button(190 + (int)(i % 3) * 94, 32 + (int)(i / 3) * 56, 88, 50, keys[i],
            BTN);
@@ -778,12 +896,46 @@ static void setting_changed(void) {
   settings_at = now;
   invalidate(0, 28, 480, 236);
 }
+#if MUSIC_BOX_CONTROLLER
+static void select_saved_song(int direction) {
+  for (unsigned step = 1; step <= SAVED_SONG_COUNT; ++step) {
+    unsigned candidate = (saved_selected + SAVED_SONG_COUNT + direction * (int)step) % SAVED_SONG_COUNT;
+    if (saved_present[candidate]) { saved_selected = candidate; break; }
+  }
+  full();
+}
+#endif
 static void touch_numeric(int x, int y) {
   unsigned col, row, k;
   size_t n;
   if (inside(x, y, 130, 32, 48, 48)) {
     numeric = 0;
     invalidate(0, 28, 480, 236);
+    return;
+  }
+  if (!show_hz) {
+    if (inside(x,y,8,204,170,48)) {
+      if(input_note<16||input_note>107){notification("Диапазон нот: E0..B7");return;}
+      send_action(3,selected,note_frequency(input_note));
+      numeric=0;
+    } else {
+      if(!inside(x,y,190,32,282,224))return;
+      col=(unsigned)(x-190)/94;row=(unsigned)(y-32)/56;
+      if((x-190)%94>=88||(y-32)%56>=50)return;
+      k=row*3+col;
+      unsigned pitch=input_note%12,octave=input_note/12;
+      int sharp=pitch==1||pitch==3||pitch==6||pitch==8||pitch==10;
+      if(k<7) {
+        unsigned base=natural_pitches[k];
+        input_note=(uint8_t)(octave*12+base+(sharp&&base!=4&&base!=11));
+      } else if(k==7) {
+        if(pitch==4||pitch==11)return;
+        if(sharp)--input_note;
+        else ++input_note;
+      } else if(k==9&&octave>1)input_note-=12;
+      else if(k==11&&octave<8)input_note+=12;
+    }
+    invalidate(0,28,480,236);
     return;
   }
   if (inside(x, y, 8, 204, 170, 48)) {
@@ -896,13 +1048,16 @@ static void tap(int x, int y) {
       selected = (selected + 1) % 6;
 #if !MUSIC_BOX_LIVE
     else if (inside(x, y, 232, 90, 184, 48)) {
-      snprintf(digits, sizeof(digits), "%lu", (unsigned long)(m->mhz / 1000));
+      if(show_hz)snprintf(digits, sizeof(digits), "%lu", (unsigned long)(m->mhz / 1000));
+      else input_note=(uint8_t)motor_note(m);
       numeric = 1;
       fresh_digits = 1;
     } else if (inside(x, y, 176, 90, 50, 48))
-      send_action(3, selected, m->mhz >= 30000 ? m->mhz - 10000 : 20000);
+      send_action(3, selected, show_hz ? (m->mhz >= 30000 ? m->mhz - 10000 : 20000) :
+                  note_frequency(motor_note(m) > 16 ? motor_note(m) - 1 : 16));
     else if (inside(x, y, 422, 90, 50, 48))
-      send_action(3, selected, m->mhz <= 3990000 ? m->mhz + 10000 : 4000000);
+      send_action(3, selected, show_hz ? (m->mhz <= 3990000 ? m->mhz + 10000 : 4000000) :
+                  note_frequency(motor_note(m) < 107 ? motor_note(m) + 1 : 107));
     else if (inside(x, y, 8, 202, 160, 48))
       send_action(4, selected, !(m->flags & 1));
     else if (inside(x, y, 176, 146, 296, 48))
@@ -913,8 +1068,8 @@ static void tap(int x, int y) {
     invalidate(0, 28, 480, 236);
   } else if (page == 2) {
 #if MUSIC_BOX_CONTROLLER
-    if(!saved_playing&&inside(x,y,8,70,56,60)){saved_selected=(saved_selected+3)%4;full();}
-    else if(!saved_playing&&inside(x,y,416,70,56,60)){saved_selected=(saved_selected+1)%4;full();}
+    if(!saved_playing&&inside(x,y,8,70,56,60))select_saved_song(-1);
+    else if(!saved_playing&&inside(x,y,416,70,56,60))select_saved_song(1);
 #else
 #if MUSIC_BOX_LIVE
     if (inside(x, y, 16, 208, 448, 48)) send_action(1, 0, 0);
@@ -968,7 +1123,7 @@ static void tap(int x, int y) {
     }
   }
 }
-static void update_overview(void) {
+static void update_overview(const uint8_t *previous_heights) {
   for (unsigned i = 0; i < 6; ++i) {
     Motor old = overview[i];
     int active = !!(motors[i].flags & 2) || ((flags & 64) && (motors[i].flags & 8));
@@ -1002,7 +1157,8 @@ static void update_overview(void) {
         overview[i].flags &= (uint8_t)~2u;
     }
     if (page == 0) {
-      int a = bar_height(&old), v = bar_height(&overview[i]);
+      int a = previous_heights ? previous_heights[i] : bar_height(&old);
+      int v = bar_height(&overview[i]);
       int w = 75 * widths[width_index] / 100, x = 8 + (int)i * 78;
       if (a != v)
         invalidate(x + (75 - w) / 2, 128 - (a > v ? a : v), w,
@@ -1023,8 +1179,11 @@ static void process_packet(void) {
   if (packet[4] == 0x40 && len == 50 && b[0] == 1) {
     uint32_t oldpos = position, oldduration = duration;
     uint8_t oldsleep = sleeping, oldreset = resetting, oldmicro = micro;
+    uint8_t previous_heights[6];
     Motor old[6];
     memcpy(old, motors, sizeof(old));
+    /* Measure the previous bars before flags/duration/mask change their scale. */
+    for (i = 0; i < 6; ++i) previous_heights[i] = (uint8_t)bar_height(&overview[i]);
     flags = b[1] & 127;
     sleeping = b[2];
     resetting = b[3];
@@ -1049,7 +1208,9 @@ static void process_packet(void) {
     }
     last_state = now;
     have_state = 1;
-    update_overview();
+    if (!(old_flags & (2|64)) && (flags & (2|64)) && !(flags & 4)) midi_stop_latched=0;
+    if (!midi_timeline_running()) midi_close_notes();
+    update_overview(previous_heights);
     if (old_flags != flags)
       invalidate(0, 0, 480, 28);
     if (page == 0) {
@@ -1073,6 +1234,13 @@ static void process_packet(void) {
       invalidate(0, 84, 480, 180);
     else if (page == 1 && old_flags != flags)
       invalidate(0, 28, 480, 26);
+  } else if (packet[4] == 0x44 && len == 2) {
+#if MUSIC_BOX_CONTROLLER
+    if (pc_range[0] != b[0] || pc_range[1] != b[1]) {
+      memcpy(pc_range,b,2);
+      if (page == 0) full();
+    }
+#endif
   } else if (packet[4] == 0x41 && len <= 48) {
     if (strlen(title) != len || memcmp(title, b, len)) {
       memcpy(title, b, len);
@@ -1083,10 +1251,13 @@ static void process_packet(void) {
         invalidate(8, 36, 264, 218);
     }
   } else if (packet[4] == 0x42 && len == 7 && b[4] < 6 && b[5] < 128) {
-    uint32_t at = get32(b);
+    if(b[6]&&midi_stop_latched) {
+      if(flags&(2|64))return; /* Ignore already queued Note On after STOP ALL. */
+      midi_stop_latched=0; /* A newly started motor after the stopped state. */
+    }
+    midi_clock_update(get32(b),midi_timeline_running()||!!b[6]);
+    uint32_t at = midi_now;
     midi_dirty = 1;
-    if ((int32_t)(at - midi_now) >= 0)
-      midi_now = at;
     for (i = 0; i < NOTES; i++)
       if (notes[i].used && notes[i].open && notes[i].motor == b[4] &&
           (b[6] || notes[i].pitch == b[5])) {
@@ -1098,13 +1269,7 @@ static void process_packet(void) {
       *n = (MidiNote){at, at, b[4], b[5], 1, 1};
     }
   } else if (packet[4] == 0x43 && len == 4) {
-    uint32_t at = get32(b);
-    if ((int32_t)(at - midi_now) < 0) {
-      memset(notes, 0, sizeof(notes));
-      note_next = 0;
-    }
-    midi_now = at;
-    midi_dirty = 1;
+    midi_clock_update(get32(b),midi_timeline_running());
   } else if (packet[4] == 0x51 && len == 1 && pending &&
              packet[3] == action_packet[3]) {
     pending = 0;
@@ -1171,6 +1336,8 @@ void display_init(const DisplayPlatform *platform) {
 #endif
   note_next = 0;
   midi_now = 0;
+  midi_source_valid=midi_stop_latched=midi_input_running=0;
+  midi_tail_ms=0;
   midi_dirty = 0;
   notice_until = 0;
   settings_dirty = 0;
@@ -1270,9 +1437,10 @@ void display_step(uint32_t ms) {
     for (i = 0; i < 6; i++)
       motors[i].flags = 0;
     pending = 0;
+    midi_close_notes();
     full();
   }
-  update_overview();
+  update_overview(NULL);
   if (pending && now - pending_at >= 300) {
     if (pending_tries >= 3) {
       pending = 0;
@@ -1338,6 +1506,7 @@ void music_box_live_ack(uint8_t sequence, uint8_t result) {
 }
 void music_box_live_history_reset(uint32_t at) {
   memset(notes, 0, sizeof(notes)); note_next = 0; midi_now = at; midi_dirty = 1;
+  midi_source_valid=0;midi_tail_ms=0;
   for (unsigned i = 0; i < 6; ++i) { motors[i].flags = 0; motors[i].note = 255; }
   full();
 }
@@ -1361,6 +1530,7 @@ void music_box_control_source(unsigned source) {
   memset(overview, 0, sizeof(overview));
   memset(overview_was_active, 0, sizeof(overview_was_active));
   memset(notes, 0, sizeof(notes)); note_next = 0; midi_now = 0;
+  midi_source_valid=0;midi_tail_ms=0;
   for (unsigned i = 0; i < 6; ++i) motors[i].flags = 0;
   position = duration = 0;
     strcpy(title, source == 1 ? "Контроллер UART" : source == 2 ? "USB-симулятор" : source == 3 ? "USB MIDI: выход ESP" : "Нет контроллера");
@@ -1371,9 +1541,15 @@ void music_box_control_connections(unsigned status) {
   connection_status = status;
   full();
 }
+void music_box_midi_input(unsigned running) {
+  if(running&&!midi_input_running)midi_stop_latched=0;
+  midi_input_running=!!running;
+  if(!midi_timeline_running())midi_close_notes();
+}
 void music_box_saved_song(unsigned slot,const char *name,unsigned present,uint32_t duration_ms) {
-  if(slot>=4)return;
+  if(slot>=SAVED_SONG_COUNT)return;
   strncpy(saved_titles[slot],name,31);saved_titles[slot][31]=0;saved_present[slot]=!!present;saved_durations[slot]=duration_ms;
+  if (!saved_playing && !saved_present[saved_selected]) select_saved_song(1);
   full();
 }
 void music_box_save_progress(unsigned stage,unsigned percent) {
@@ -1381,6 +1557,7 @@ void music_box_save_progress(unsigned stage,unsigned percent) {
   if(save_stage==stage&&save_percent==percent)return;
   unsigned old_stage=save_stage;
   save_stage=stage;save_percent=percent;
+  if (old_stage != stage && (old_stage == 5 || stage == 5)) invalidate(0,34,480,170);
   if((old_stage==0||old_stage==5)&&(stage==0||stage==5))invalidate(8,204,464,54);
   else full();
 }
@@ -1390,5 +1567,6 @@ void music_box_playback_error(const char *reason) {
   save_stage=7;full();
 }
 void music_box_saved_offset(uint32_t offset){saved_offset=offset;position=offset;full();}
+void music_box_saved_range(uint8_t low,uint8_t high){saved_range[0]=low;saved_range[1]=high;full();}
 void music_box_saved_playing(unsigned playing) {saved_playing=!!playing;full();}
 #endif

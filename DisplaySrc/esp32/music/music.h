@@ -3,18 +3,18 @@
 #include <stddef.h>
 namespace music {
 enum class Type : uint8_t { On, Off, Control, Reset };
-struct Event { Type type; uint8_t channel, note, velocity; uint64_t timestamp; uint8_t source = 0; };
+struct Event { Type type; uint8_t channel, note, velocity; uint64_t timestamp; uint8_t source = 0; bool batch_end = true; };
 struct Config {
     unsigned voices = 6;
     int group_gap = 13, group_span = 24, track_distance = 7;
     uint64_t gesture_us = 40000, track_us = 600000;
     int independent = 260, melody = 400, bass = 160;
     int root = 180, third = 110, seventh = 90, fifth = 40, dyad_third = 20;
-    int duplicate = 220, retained = 12, age = 8, released = 20;
+    int duplicate = 220, retained = 12, released = 20;
+    unsigned pedal_age_per_second = 80, pedal_age_max = 240;
     int distance_weight = 10, direction_penalty = 8, track_confidence_weight = 3;
     unsigned line_threshold = 2, max_confidence = 4;
     int confidence_bonus = 20, bass_boundary = 48, velocity_divisor = 16;
-    uint64_t age_unit_us = 50000;
 };
 struct Chord { const char *name; uint8_t intervals[4], count; };
 extern const Chord chords[9];
@@ -34,7 +34,11 @@ public:
     unsigned continuity(uint8_t note) const { return confidence[note]; }
     unsigned overflow_count = 0;
 private:
-    struct Key { uint64_t at = 0; uint8_t note = 0, channel = 0, source = 0, velocity = 0, track = 0; bool used = false, down = false; };
+    struct Key {
+        uint64_t at = 0, released_at = 0, order = 0;
+        uint8_t note = 0, channel = 0, source = 0, velocity = 0, track = 255;
+        bool used = false, down = false;
+    };
     struct Track { uint64_t at = 0; int note = 0, direction = 0; uint8_t channel = 0, source = 0, confidence = 0; bool used = false; };
     Config cfg;
     Key keys[256] = {};
@@ -45,7 +49,7 @@ private:
     NoteSet selected;
     int groups[128] = {};
     unsigned confidence[128] = {};
-    uint64_t selected_at[128] = {};
+    uint64_t sequence = 0;
     uint8_t assign_track(const Event &e);
     NoteSet choose(uint64_t now);
 };

@@ -28,9 +28,8 @@ void Engine::reset() {
     for (auto &t:tracks) t={};
     std::memset(sustain,0,sizeof(sustain));
     std::memset(confidence,0,sizeof(confidence));
-    std::memset(selected_at,0,sizeof(selected_at));
     std::fill(groups,groups+128,-1);
-    selected={}; history_head=0;
+    selected={}; history_head=0; sequence=0;
 }
 uint8_t Engine::assign_track(const Event &e) {
     int best=-1, cost=100000;
@@ -74,33 +73,46 @@ NoteSet Engine::process(Event e) {
         for(auto &k:keys) if(k.used && k.source==e.source && k.channel==e.channel) {
             if(e.note==120) k={};
             else {
-                if(e.note==123) k.down=false;
+                if((e.note==123 || (e.note>=124 && e.note<=127)) && k.down) {
+                    k.down=false; k.released_at=e.timestamp;
+                }
                 if(!k.down && !sustain[e.source][e.channel]) k={};
             }
         }
     } else {
         Key *key=nullptr;
-        for(auto &k:keys) if(k.used && k.note==e.note && k.channel==e.channel && k.source==e.source) {key=&k;break;}
         if(e.type==Type::Off) {
-            if(key) {key->down=false;if(!sustain[e.source][e.channel]) *key={};}
+            // FIFO pairs overlapping attacks of the same key; pedal tails have
+            // already received their Off and must never consume a new one.
+            for(auto &k:keys) if(k.used && k.down && k.note==e.note &&
+                k.channel==e.channel && k.source==e.source && (!key || k.order<key->order)) key=&k;
+            if(key) {key->down=false;key->released_at=e.timestamp;if(!sustain[e.source][e.channel]) *key={};}
         } else if(e.type==Type::On) {
-            if(key) key->down=false;
             uint8_t track=assign_track(e);
-            if(!key) for(auto &k:keys) if(!k.used) {key=&k;break;}
+            // A new attack subsumes older pedal tails of this exact key. They
+            // have no pending Off and share the same pedal/release conditions.
+            // Keep overlapping DOWN instances for FIFO pairing, but do not fill
+            // the pool with repetitions during a long pedal gesture.
+            for(auto &k:keys) if(k.used && !k.down && k.note==e.note &&
+                k.channel==e.channel && k.source==e.source) k={};
+            for(auto &k:keys) if(!k.used) {key=&k;break;}
             if(!key) {++overflow_count;reset();return selected;}
-            *key={e.timestamp,e.note,e.channel,e.source,e.velocity,track,true,true};
+            *key={e.timestamp,0,++sequence,e.note,e.channel,e.source,e.velocity,track,true,true};
         }
     }
-    return choose(e.timestamp);
+    return e.batch_end ? choose(e.timestamp) : selected;
 }
 NoteSet Engine::choose(uint64_t now) {
     bool active[128]={}, down[128]={}, old[128]={};
     int velocity[128]={};
+    uint64_t released_at[128]={}, newest_order[128]={};
     std::fill(confidence,confidence+128,0);
     std::fill(groups,groups+128,-1);
     for(auto &k:keys) if(k.used) {
         active[k.note]=true;down[k.note]|=k.down;
         velocity[k.note]=std::max(velocity[k.note],int(k.velocity));
+        released_at[k.note]=std::max(released_at[k.note],k.released_at);
+        newest_order[k.note]=std::max(newest_order[k.note],k.order);
         if(k.track<32 && tracks[k.track].note==k.note)
             confidence[k.note]=std::max(confidence[k.note],unsigned(tracks[k.track].confidence));
     }
@@ -133,18 +145,26 @@ NoteSet Engine::choose(uint64_t now) {
             } else if(n==first[group]) s+=cfg.root/2;
             for(int j=0;j<i;++j) if(groups[pitches[j]]==group && pitches[j]%12==n%12) {s-=cfg.duplicate;break;}
         }
-        if(old[n]) s+=cfg.retained+int(std::min<uint64_t>(cfg.age,(now>=selected_at[n]?(now-selected_at[n])/std::max<uint64_t>(1,cfg.age_unit_us):0)));
-        if(!down[n]) s-=cfg.released;
+        if(old[n]) s+=cfg.retained;
+        if(!down[n]) {
+            const uint64_t elapsed=now>=released_at[n]?now-released_at[n]:0;
+            // Bound elapsed before multiplication: silent, very old tails cannot overflow.
+            const uint64_t age=std::min<uint64_t>(elapsed,UINT64_C(3600000000));
+            s-=cfg.released+int(std::min<uint64_t>(cfg.pedal_age_max,age*cfg.pedal_age_per_second/1000000));
+        }
         score[n]=s;
     }
     // Score ties: existing note, then lower physical MIDI note. Output ascending.
     std::sort(pitches,pitches+count,[&](int a,int b){
         if(score[a]!=score[b]) return score[a]>score[b];
+        if(down[a]!=down[b]) return down[a];
+        if(!down[a] && released_at[a]!=released_at[b]) return released_at[a]>released_at[b];
+        if(!down[a] && newest_order[a]!=newest_order[b]) return newest_order[a]>newest_order[b];
         if(old[a]!=old[b]) return old[a];
         return a<b;
     });
     NoteSet next;next.count=uint8_t(std::min(unsigned(count),cfg.voices));
-    for(unsigned i=0;i<next.count;++i) {next.notes[i]=uint8_t(pitches[i]);if(!old[pitches[i]]) selected_at[pitches[i]]=now;}
+    for(unsigned i=0;i<next.count;++i) next.notes[i]=uint8_t(pitches[i]);
     std::sort(next.notes,next.notes+next.count);selected=next;return next;
 }
 bool decode_usb(const uint8_t p[4],uint64_t t,Event &e) {

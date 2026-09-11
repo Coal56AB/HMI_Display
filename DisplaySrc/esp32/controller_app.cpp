@@ -5,6 +5,7 @@
 #include "midi_app.h"
 #include "song_store.h"
 #include "esp_link.h"
+#include "startup_link.h"
 #include "driver/usb_serial_jtag.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -65,6 +66,7 @@ void put32(uint8_t *p, uint32_t n) { for(unsigned i=0;i<4;++i)p[i]=uint8_t(n>>(8
 }
 void app_midi_snapshot(const live::Snapshot &s, bool reset_history) {
     midi_connected = s.connected;
+    music_box_midi_input(s.connected && s.enabled);
     const uint32_t now = hmi_platform.now_ms();
     uint8_t p[50]{};
     if (reset_history) {
@@ -94,10 +96,9 @@ void app_midi_ack(uint8_t sequence, uint8_t result) {
     uint8_t bytes[8];control::encode(bytes,0x51,&result,1,sequence);
     music_box_control_frame(bytes,sizeof(bytes));
 }
-void hmi_module_start() {
+bool hmi_module_start() {
     hmi_boot_status("UART LINK",55);
     esp_link_start();
-    song_store_start();
     usb_serial_jtag_driver_config_t usb{};
     usb.tx_buffer_size = 512; usb.rx_buffer_size = 4096;
     ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usb));
@@ -110,16 +111,42 @@ void hmi_module_start() {
         if(i%20==0)hmi_boot_status("USB DETECT",65+i/5);
         vTaskDelay(pdMS_TO_TICKS(10));
     }
+    hmi_boot_status("UART LINK",85);
+    // Discard pre-check data: success must come from the new heartbeat.
+    uint8_t stale[256];
+    while (esp_link_read(stale, sizeof(stale)) > 0) {}
+    StartupLink startup(hmi_platform.now_ms());
+    while (startup.state(hmi_platform.now_ms()) == StartupLink::State::Waiting) {
+        const uint32_t now = hmi_platform.now_ms();
+        uint8_t bytes[256];
+        const int count = esp_link_read(bytes, sizeof(bytes));
+        for (int i = 0; i < count; ++i) startup.feed(bytes[i], now);
+        if (startup.state(now) != StartupLink::State::Waiting) break;
+        if (startup.probe_due(now)) {
+            // Register the screen link, but do not request motor authority or
+            // issue START/boot-test commands during the health check.
+            uint8_t frame[13], payload[6] = {255, 0, 0, 0, 0, 0};
+            control::encode(frame, 0x50, payload, sizeof(payload));
+            if (esp_link_send(frame, sizeof(frame)) == sizeof(frame)) startup.probe_sent(now);
+        }
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+    if (startup.state(hmi_platform.now_ms()) != StartupLink::State::Ready) {
+        music_box_boot_error(&hmi_platform);
+        return false;
+    }
+    song_store_start();
     ESP_LOGI("hmi", "USB role: %s; hold BOOT 2s after changing cable to select again",
              usb_device ? "PC simulator" : "MIDI host");
     if(!usb_device) {
         ESP_ERROR_CHECK(usb_serial_jtag_driver_uninstall());
-        hmi_boot_status("MIDI HOST",85);
+        hmi_boot_status("MIDI HOST",90,0);
         midi_app_start();
     }
-    if(usb_device)hmi_boot_status("USB PC",85);
+    if(usb_device)hmi_boot_status("USB PC",90,0);
     ESP_ERROR_CHECK(gpio_set_direction(GPIO_NUM_0,GPIO_MODE_INPUT));
     ESP_ERROR_CHECK(gpio_set_pull_mode(GPIO_NUM_0,GPIO_PULLUP_ONLY));
+    return true;
 }
 void hmi_module_tick(uint32_t now) {
     uint8_t bytes[256];
