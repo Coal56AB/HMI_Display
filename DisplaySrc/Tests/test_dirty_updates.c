@@ -23,5 +23,13 @@ int main(void){
     hmi_state_defaults(&s);hmi_render_full(&s,collect,actual);
     {HmiState next=s;next.clock="23:59";hmi_diff_and_invalidate(&s,&next);hmi_render_dirty(&next,collect,actual);
      assert(hmi_dirty_pixel_count()<153600);hmi_render_full(&next,collect,expected);assert(memcmp(actual,expected,sizeof(actual))==0);}
+    hmi_state_defaults(&s);s.dynamic_values=1;s.telemetry_flags=128;s.precharge_seconds=0;
+    hmi_render_full(&s,collect,actual);
+    {static const float seconds[]={9.9f,99.9f,100.0f,999.9f,1000.0f,99999.9f,1.0f};
+     for(unsigned i=0;i<sizeof(seconds)/sizeof(seconds[0]);i++){
+        HmiState next=s;next.precharge_seconds=seconds[i];hmi_diff_and_invalidate(&s,&next);
+        hmi_render_dirty(&next,collect,actual);hmi_render_full(&next,collect,expected);
+        assert(memcmp(actual,expected,sizeof(actual))==0);s=next;
+     }}
     puts("dirty: all 47 scenes tiled reconstruction and clock transition PASS");return 0;
 }

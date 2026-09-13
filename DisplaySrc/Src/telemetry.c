@@ -67,7 +67,7 @@ void telemetry_init(HmiUi *ui){
     ui->state.motor_load=-1;ui->state.power_state=HMI_POWER_OFF;
     ui->state.inverter_enabled=ui->state.regulation_active=0;
     ui->state.telemetry_flags=128;
-    memcpy(ui->clock,"--:--",6);ui->graph_running=1;
+    memcpy(ui->clock,"--:--",6);ui->graph_running=1;ui->graph_time_ms=HMI_GRAPH_LIVE_MIN_MS;
     for(i=0;i<4;i++){
         static const uint16_t colors[]={15709,63016,36454,62154};
         ui->state.graph[i].visible=1;ui->state.graph[i].color_rgb565=colors[i];
@@ -99,7 +99,8 @@ static uint8_t apply(HmiUi *ui,const uint8_t *p,unsigned type,unsigned n,uint32_
             if(axes)hmi_invalidate((HmiRect){7,101,306,188});
             else {unsigned width=(ui->state.graph_page==HMI_GRAPH_SPEED&&ui->state.drive_mode==HMI_DRIVE_SF)?279:255;
                 unsigned x=30+(cursor-1)*width/239;hmi_invalidate((HmiRect){(uint16_t)(x>30?x-1:x),106,(uint16_t)(cursor==POINTS?2:(30+cursor*width/239-x+2)),178});
-                if(old_cursor){x=30+(old_cursor-1)*width/239;hmi_invalidate((HmiRect){(uint16_t)x,106,1,178});}}
+                if(old_cursor){unsigned first=old_cursor>1?old_cursor-2:0,last=old_cursor<POINTS?old_cursor:POINTS-1;
+                    x=30+first*width/239;hmi_invalidate((HmiRect){(uint16_t)x,106,(uint16_t)(30+last*width/239-x+2),178});}}
             if(now-graph_stats_tick>=1000){graph_stats_tick=now;hmi_invalidate((HmiRect){7,361,306,67});}
         }return 0;
     }
@@ -177,12 +178,6 @@ static uint8_t apply(HmiUi *ui,const uint8_t *p,unsigned type,unsigned n,uint32_
         for(i=0;i<23;i++)memcpy((uint8_t *)&ui->state+fields[i],p+12+i*4,4);
         for(i=0;i<3;i++)ui->parameters[i]=i==0?ui->state.modulation_set:i==1?ui->state.rotation_set:ui->state.current_limit_set;
         /* p[8..11]: controller uptime, reserved for future clock display. */
-        if(!old.inverter_enabled&&ui->state.inverter_enabled){clear_graph(ui);ui->graph_running=1;}
-        if(old.inverter_enabled&&!ui->state.inverter_enabled){
-            ui->graph_running=0;
-            ui->state.graph_valid_count=ui->state.graph_cursor;
-            if(ui->state.page==HMI_PAGE_GRAPHS&&ui->state.dialog==HMI_DIALOG_NONE)hmi_invalidate((HmiRect){7,101,306,233});
-        }
         hmi_diff_and_invalidate(&old,&ui->state);
         if(old.telemetry_flags!=ui->state.telemetry_flags||old.power_state!=ui->state.power_state)
             hmi_invalidate((HmiRect){8,3,300,137});

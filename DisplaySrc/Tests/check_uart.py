@@ -30,7 +30,7 @@ int main(void){
  assert(ui.state.pending_mask==3);assert(ui.state.pending_setpoints[0]==67);
  assert(ui.state.graph[0].sample_count==240);assert(ui.state.graph[0].samples[239]==239);
  assert(ui.state.graph_scale[0]==100);assert(resets==0);
- assert(ui.state.dc_bus_voltage==311);telemetry_poll(&ui,now+10001);
+ assert(ui.graph_running);assert(ui.state.dc_bus_voltage==311);telemetry_poll(&ui,now+10001);
  assert(ui.state.power_state==HMI_POWER_READY);assert(ui.state.telemetry_flags&64);assert(!(ui.state.telemetry_flags&1));
  return 0;
 }
@@ -38,7 +38,7 @@ int main(void){
     exe=build/'uart_parser_check.exe'
     env=os.environ.copy();env['PATH']='C:/mingw64/bin;'+env['PATH']
     subprocess.run(['C:/mingw64/bin/gcc.exe','-std=c99','-Os','-Wall','-Wextra','-Werror',
-      '-I'+str(LIB/'Include'),'-I'+str(LIB/'ThirdParty/tinf'),'-IPlatform/Stm32',
+      '-I'+str(LIB/'Include'),'-I'+str(LIB/'ThirdParty/tinf'),'-IPlatform/Common',
       *map(str,(LIB/'Src').glob('*.c')),str(LIB/'ThirdParty/tinf/tinflate.c'),
       str(source),'-o',str(exe)],check=True,env=env)
     assert crc16(b'123456789')==0x29b1
@@ -48,6 +48,7 @@ int main(void){
     for start in range(0,240,47):
       f=graph_chunk(3+start,0,0,start,[i/100 for i in range(start,min(start+47,240))],[-3,3],100,cursor=120)
       frames.extend([f,f])  # retries must be idempotent
+    frames.extend([packet(2,struct.pack('<IBBBBI23f',398,3,0,0,29,200,*values)),packet(2,struct.pack('<IBBBBI23f',399,2,0,0,28,300,*values))])
     frames.extend([packet(8,struct.pack('<IBB5f',400,25,1,.84,.71,4.3,4.3,142)),packet(8,struct.pack('<IBB5f',401,100,2,.84,.71,4.3,4.3,142))])
     bad=bytearray(frames[0]);bad[-1]^=1
     stream=bytes(bad)+b'noise'+b''.join(frames)

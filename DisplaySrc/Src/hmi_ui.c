@@ -432,7 +432,7 @@ static void invalidate_overlay(const HmiUi *ui,HmiAction action,int arg){
         if(action==HMI_ACTION_MODE&&ui->state.page==HMI_PAGE_PARAMETERS&&ui->state.param_section==HMI_PARAM_SYSTEM)
             r=(HmiRect){116,184,193,29};
         if(ui->state.page==HMI_PAGE_GRAPHS){
-            if(action==HMI_ACTION_GRAPH_ZOOM)r=(HmiRect){50,303,66,24};
+            if(action==HMI_ACTION_GRAPH_ZOOM){hmi_invalidate((HmiRect){1,284,318,17});r=(HmiRect){50,303,66,24};}
             if(action==HMI_ACTION_GRAPH_RUN)r=(HmiRect){162,299,150,35};
         }
         if(action==HMI_ACTION_JOURNAL_PAGE&&ui->state.page==HMI_PAGE_JOURNAL)r=(HmiRect){140,398,40,24};
@@ -478,7 +478,7 @@ void hmi_ui_dispatch(HmiUi *ui,HmiAction action,int16_t arg){
         static const uint32_t divisions[]={2,5,10,20,50,100,200,500,1000,2000,5000};
         unsigned k=0;while(k<10&&divisions[k]<previous)k++;
         if(arg>0&&k)k--;else if(arg<0&&k<10)k++;
-        ui->graph_time_ms=divisions[k];
+        ui->graph_time_ms=ui->graph_running&&divisions[k]<HMI_GRAPH_LIVE_MIN_MS?HMI_GRAPH_LIVE_MIN_MS:divisions[k];
         event(ui,HMI_EVENT_GRAPH_CHANGED,1,(float)ui->graph_time_ms,0,NULL);
         if(previous==ui->graph_time_ms)action=HMI_ACTION_NONE;
         break;
@@ -486,6 +486,11 @@ void hmi_ui_dispatch(HmiUi *ui,HmiAction action,int16_t arg){
     case HMI_ACTION_GRAPH_RUN:
         if(ui->state.graph[0].sample_count)hmi_invalidate((HmiRect){7,101,306,191});
         ui->graph_running^=1;
+        if(ui->graph_running&&ui->graph_time_ms<HMI_GRAPH_LIVE_MIN_MS){
+            ui->graph_time_ms=HMI_GRAPH_LIVE_MIN_MS;
+            event(ui,HMI_EVENT_GRAPH_CHANGED,1,HMI_GRAPH_LIVE_MIN_MS,0,NULL);
+            hmi_invalidate((HmiRect){1,284,318,50});
+        }
         if(ui->graph_running){unsigned c;ui->state.graph_cursor=ui->state.graph_valid_count=0;for(c=0;c<4;c++)ui->state.graph[c].sample_count=0;}
         else ui->state.graph_valid_count=ui->state.graph_cursor;
         event(ui,HMI_EVENT_GRAPH_CHANGED,2,ui->graph_running,0,NULL);break;
@@ -720,7 +725,7 @@ static void home_values(HmiUi *ui){
 }
 
 static void paint(void *user){
-    HmiUi *ui=(HmiUi *)user;HmiDialog d=ui->state.dialog;char text[64];unsigned i;
+    HmiUi *ui=(HmiUi *)user;HmiDialog d=ui->state.dialog;char text[128];unsigned i;
         if(d==HMI_DIALOG_NONE&&ui->state.page!=HMI_PAGE_HOME&&!collect_labels&&(ui->state.telemetry_flags&128u))for(i=0;i<3;i++){
             int x=(int)i*106+1;float v=i==0?ui->state.modulation_set:i==1?ui->state.rotation_set:ui->state.current_limit_set;
             uint16_t color=(ui->state.control_warning_mask&(1u<<i))?62946u:36454u;

@@ -39,7 +39,11 @@ def running(text):
  QtCore.QTimer.singleShot(2500,stop_history)
 
 def stop_history():
- w.js('Sim.toggleInverter()');QtCore.QTimer.singleShot(250,pan_history)
+ w.js('Sim.toggleInverter()')
+ w.preview.lib.renderer_page(1)
+ w.preview.lib.renderer_touch(270,315,1,1000)
+ w.preview.lib.renderer_touch(270,315,0,1100)
+ QtCore.QTimer.singleShot(250,pan_history)
 
 def pan_history():
  w.js('window.PchUart.fieldEvent({type:3,id:3,value:-1});JSON.stringify({offset:window.PchUart.snapshot().graph.offsetMs,collecting:Graph.collecting})',verify_history)

@@ -244,10 +244,18 @@ void hmi_draw_dynamic(const HmiState *s) {
     if(s->page==HMI_PAGE_HOME&&ui_rect_visible(0,80,320,40)&&(s->telemetry_flags&128u||s->power_state==HMI_POWER_CHARGE)&&s->precharge_seconds>=0.0f){
         uint16_t timer_color=indicator(s,3);
         (void)snprintf(value,sizeof(value),"%.1f",(double)s->precharge_seconds);
-        ui_set_clip(1,1,318,478);ui_fill_round_rect(123,92,26,17,2,2211u);
-        ui_round_rect(123,92,26,17,2,timer_color);
-        width=ui_measure_cstr(10,value);x=136-(width+7)/2;
-        ui_text_cstr(x,104,10,timer_color,value,1);ui_text_cstr(x+width+3,104,10,timer_color,"с",1);
+        width=ui_measure_cstr(10,value)+7;
+        int box=width+6;if(box<26)box=26;if(box>36)box=36;
+        ui_set_clip(118,92,36,17);ui_fill_round_rect(136-box/2,92,box,17,2,2211u);
+        ui_round_rect(136-box/2,92,box,17,2,timer_color);
+        if(width<=box-4){
+            x=136-width/2;
+            ui_text_cstr(x,104,10,timer_color,value,1);ui_text_cstr(x+width-4,104,10,timer_color,"\u0441",1);
+        }else{
+            char label[32];(void)snprintf(label,sizeof(label),"%s \u0441",value);
+            ui_text_fit_cstr(136-box/2+2,104,10,timer_color,label,1,box-4);
+        }
+        ui_set_clip(1,1,318,478);
     }
     if(s->page==HMI_PAGE_GRAPHS){draw_graph(s);return;}
     if(s->page==HMI_PAGE_JOURNAL&&s->journal){draw_journal(s);return;}

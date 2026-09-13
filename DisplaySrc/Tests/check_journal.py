@@ -43,6 +43,6 @@ int main(void){
 }
 ''',encoding='utf-8')
  env=os.environ.copy();env['PATH']='C:/mingw64/bin;'+env['PATH']
- subprocess.run(['C:/mingw64/bin/gcc.exe','-std=c99','-Os','-Wall','-Wextra','-Werror','-IPlatform/Stm32','Platform/Stm32/journal_store.c',str(src),'-o','.build/check_journal.exe'],check=True,env=env)
+ subprocess.run(['C:/mingw64/bin/gcc.exe','-std=c99','-Os','-Wall','-Wextra','-Werror','-IPlatform/Common','Platform/Common/journal_store.c',str(src),'-o','.build/check_journal.exe'],check=True,env=env)
  subprocess.run(['.build/check_journal.exe'],check=True,env=env)
 if __name__=='__main__':main()

@@ -93,3 +93,14 @@ def graph_column(seq, page, cursor, values, ranges, scales):
         raw.extend(struct.pack('<hh',lo,hi))
     for i in range(4):raw.extend(struct.pack('<h',max(-32768,min(32767,round(values[i]*scales[i]))) if i<count else 0))
     return packet(10,raw)
+
+
+def open_port(port, write_timeout):
+    """Open a data link without asserting ESP reset/boot control lines."""
+    import serial
+    link = serial.Serial(port=None, baudrate=115200, timeout=0, write_timeout=write_timeout)
+    link.dtr = False
+    link.rts = False
+    link.port = port
+    link.open()
+    return link

@@ -94,7 +94,7 @@ void hmi_diff_and_invalidate(const HmiState *a,const HmiState *b){
     if(a->mains_voltage!=b->mains_voltage||a->mains_frequency!=b->mains_frequency)
         hmi_invalidate((HmiRect){18u,49u,47u,28u});
     if(a->precharge_current!=b->precharge_current)hmi_invalidate((HmiRect){116u,49u,41u,16u});
-    if(a->precharge_seconds!=b->precharge_seconds)hmi_invalidate((HmiRect){121u,90u,30u,21u});
+    if(a->precharge_seconds!=b->precharge_seconds)hmi_invalidate((HmiRect){117u,90u,38u,21u});
     if(a->dc_bus_voltage!=b->dc_bus_voltage){hmi_invalidate((HmiRect){168u,49u,40u,16u});hmi_invalidate((HmiRect){62u,405u,50u,19u});}
     if(a->modulation_set!=b->modulation_set||a->modulation_actual!=b->modulation_actual)
         hmi_invalidate((HmiRect){119u,177u,191u,25u});

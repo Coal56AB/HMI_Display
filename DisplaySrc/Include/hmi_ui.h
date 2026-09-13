@@ -1,6 +1,8 @@
 #ifndef HMI_UI_H
 #define HMI_UI_H
 
+#define HMI_GRAPH_LIVE_MIN_MS 500u
+
 #include "hmi.h"
 
 #ifdef __cplusplus

@@ -1,0 +1,7 @@
+    .section .rodata.pch_assets,"a"
+    .balign 4
+    .global pch_assets_start
+pch_assets_start:
+    .incbin "@pch_assets@"
+    .global pch_assets_end
+pch_assets_end:

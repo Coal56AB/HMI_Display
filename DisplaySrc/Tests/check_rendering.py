@@ -23,6 +23,11 @@ for state in (0,1,2,3,1,0):
 send(2,struct.pack('<IBBBBI23f',1,5,0,0,8,0,*([0.0]*23)))
 send(9,struct.pack('<I12B',1,3,1,*([0]*10)))
 l.renderer_dialog(12);validate()
+# Growing/shrinking timer frames must fully restore the underlying schematic.
+l.renderer_page(0);l.renderer_dialog(0)
+for seconds in (9.9,99.9,100,999.9,1000,99999.9,1):
+ values=[0.0]*23;values[4]=seconds
+ send(2,struct.pack('<IBBBBI23f',1,0,0,0,8,0,*values));validate()
 # A graph update may touch only its changed columns, apart from the 1 Hz statistics.
 l.renderer_page(1)
 for i in range(1,241):

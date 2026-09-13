@@ -15,18 +15,22 @@
       "Src/hmi_ui.c",
       "Src/telemetry.c",
       "ThirdParty/tinf/tinflate.c",
-      "Platform/Stm32/display_module.c",
-      "Platform/Stm32/journal_app.c",
-      "Platform/Stm32/journal_store.c"
+      "Platform/Common/display_module.c",
+      "Platform/Common/journal_app.c",
+      "Platform/Common/journal_store.c"
     ],
     "includes": [
       "Include",
       "ThirdParty/tinf",
-      "Platform/Stm32"
+      "Platform/Common"
     ],
     "defines": [
       "HMI_EXTERNAL_ASSETS=1",
       "HMI_LITE=0"
     ]
+  },
+  "editorSimulator": {
+    "version": 1,
+    "entry": "Simulator/editor_adapter.py"
   }
 }

@@ -178,8 +178,8 @@ class Terminal:
             self.disconnect()
             return
         try:
-            import serial
-            self.serial = serial.Serial(self.port.get(), 115200, timeout=0, write_timeout=.05)
+            from uart_protocol import open_port
+            self.serial = open_port(self.port.get(), .05)
             self.serial.reset_input_buffer()
             self.decoder = Decoder()
             self.pending = None

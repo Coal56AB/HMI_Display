@@ -9,7 +9,12 @@ import struct
 import threading
 import time
 import webbrowser
-from uart_protocol import Decoder, FIELDS, packet, telemetry, graph, graph_chunk, graph_column
+if __package__:
+    from .graph_stream import GraphStream
+    from .uart_protocol import Decoder, FIELDS, packet, telemetry, graph, graph_chunk, graph_column
+else:
+    from graph_stream import GraphStream
+    from uart_protocol import Decoder, FIELDS, packet, telemetry, graph, graph_chunk, graph_column
 
 ROOT = Path(__file__).resolve().parent
 
@@ -36,10 +41,9 @@ class Link:
         self.events = []
         self.status = 'Локальная симуляция · UART не подключён'
         self.graph = dict(page=0, flags=1, division=200)
-        self.sweep_frame = None
-        self.sweep_cursor = 1
         self.graph_offset = None
         self.graph_revision = None
+        self.graph_stream = GraphStream()
         self.next_cycle = 0
         self.last_telemetry = 0
         self.last_auto = 0
@@ -48,10 +52,10 @@ class Link:
         self.alive = True
 
     def connect(self, port):
-        import serial
+        from uart_protocol import open_port
         with self.lock:
             self.disconnect()
-            self.serial = serial.Serial(port, 115200, timeout=0, write_timeout=.1)
+            self.serial = open_port(port, .1)
             self.serial.reset_input_buffer()
             self.decoder = Decoder()
             self.status = f'{port}: ожидание ответа дисплея'
@@ -99,7 +103,6 @@ class Link:
                                     self.jobs.clear()
                                     stopping = (self.graph['flags'] & 1) and not (flags & 1) and page == self.graph['page'] and division == self.graph['division']
                                     if not stopping:self.graph_revision = None
-                                    self.sweep_frame = None
                                 self.graph = dict(page=page, flags=flags, division=division)
                             self.status = f'На связи · ACK {self.acks} · CRC ошибок {self.decoder.errors}'
                             if status == 1:
@@ -119,17 +122,14 @@ class Link:
                     if now-self.last_telemetry>=.25:self.jobs.extend([('telemetry', None), ('visual', None)])
                     g = self.latest.get('graph', {})
                     if (self.graph['flags'] & 2) and ((self.graph['flags'] & 1) or g.get('revision') != self.graph_revision) and g.get('page') == self.graph['page'] and g.get('division',self.graph['division'])==self.graph['division']:
-                        if self.graph_revision!=g.get('revision'):self.sweep_frame=None
                         self.graph_revision = g.get('revision')
                         if self.graph_offset!=g.get('offsetMs',0):
                             self.graph_offset=g.get('offsetMs',0);self.jobs.append(('axis',self.graph_offset))
-                        if self.graph['flags'] & 1:
-                            if self.sweep_frame is None or self.sweep_cursor>=240:
-                                self.sweep_frame=g;self.sweep_cursor=1
-                            else:self.sweep_cursor+=1
-                            capture=self.sweep_frame;point=self.sweep_cursor-1
-                            self.jobs.append(('column',(capture['page'],self.sweep_cursor,[v[point] for v in capture['channels']],capture['ranges'],capture['scales'])))
+                        columns=self.graph_stream.columns(g, budget=12) if self.graph['flags'] & 1 else None
+                        if columns is not None:
+                            self.jobs.extend(('column', value) for value in columns)
                         else:
+                            if not self.graph['flags'] & 1:self.graph_stream = GraphStream()
                             for ch, values in enumerate(g.get('channels', [])[:4]):
                                 if len(values) == 240:
                                     for start in range(0, 240, 47):

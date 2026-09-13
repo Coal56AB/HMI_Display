@@ -12,7 +12,6 @@
   Sim.prechargeR = 150;
   let activeDischarge = false, dischargePrevious = 0, requested = {page:0,flags:1,division:200};
   let online = false, busy = false, historyOffset=0, graphRevision=0;
-  let sweep={page:-1,span:0,bucket:-1,channels:[]};
   const modeNames = ['power','speed','limit','dqD','dqQ'];
   const style = document.createElement('style');
   style.textContent = '#uart-tools{position:fixed;left:12px;top:12px;width:260px;z-index:90;background:#14242c;color:#edf1f2;border:1px solid #52636b;border-radius:8px;padding:12px;font:13px Arial}#uart-tools button,#uart-tools select,#uart-tools input{font:13px Arial;margin:5px 2px;padding:7px;background:#213640;color:#edf1f2;border:1px solid #52636b;border-radius:4px}#uart-tools p{margin:8px 0;line-height:1.4}#uart-tools label{display:block}#uart-tools small{color:#b3c0c7}#uart-tools.collapsed>*:not(h3){display:none}#uart-tools h3{margin:0;cursor:pointer;font-size:14px}#discharge-choice{position:absolute;left:calc(100% + 10px);top:0;width:180px;padding:8px;border:1px solid #52636b;border-radius:5px;background:#14242c;color:#edf1f2;font:12px Arial;white-space:normal}.debug-panel{position:relative}';
@@ -55,14 +54,12 @@
   const oldStep=Sim.step, oldPublish=Sim.publishTelemetry, oldToggle=Sim.toggleCharge;
   Sim.toggleInverter=function(){
     if(this.chargeState==='discharging'&&activeDischarge){
-      this.chargeStartDc=this.dc;this.chargeStartedAt=performance.now();this.chargeElapsed=0;
-      activeDischarge=false;Graph.pause();this.publishTelemetry();R.Journal.add('info','СТОП: продолжение самостоятельного разряда');return;
+      this.chargeStartDc=this.dc;this.chargeStartedAt=(window.PchHostClock?window.PchHostClock.now:performance.now());this.chargeElapsed=0;
+      activeDischarge=false;this.publishTelemetry();R.Journal.add('info','СТОП: продолжение самостоятельного разряда');return;
     }
     const wasRunning=this.inverterOn;
     if(!wasRunning&&(mainsStates().includes(3)||this.chargeState!=='charged'||this.dc<this.mainsVoltage*Math.SQRT2*.92)){R.toast('Пуск недоступен: проверьте сеть и заряд DC');return;}
     this.inverterOn=!wasRunning;this.publishTelemetry();this.updateUI();R.Journal.add('info',this.inverterOn?'Инвертор включён':'Инвертор выключен');
-    if(wasRunning&&!this.inverterOn)Graph.pause();
-    if(!wasRunning&&this.inverterOn){Graph.startNew();historyOffset=0;graphRevision++;sweep.page=-1;}
   };
   function dischargeVoltage(t){
     const start=Sim.chargeStartDc, leak=Math.max(100,Number(document.getElementById('uart-leak').value)*1000||100000);
@@ -72,7 +69,7 @@
   }
   Sim.step=function(dt){
     if(mainsStates().includes(3)&&(this.chargeState==='charging'||this.chargeState==='charged')){
-      this.inverterOn=false;activeDischarge=false;Graph.pause();oldToggle.call(this);R.Journal.add('fault','Сеть: аварийное напряжение или частота');
+      this.inverterOn=false;activeDischarge=false;oldToggle.call(this);R.Journal.add('fault','Сеть: аварийное напряжение или частота');
     }
     if(this.chargeState!=='discharging'){oldStep.call(this,dt);
       const target=Math.max(0,this.mainsVoltage)*Math.SQRT2;
@@ -132,7 +129,7 @@
     else if(e.type===3){
       if(e.id===0)Graph.setMode(modeNames[e.value]);
       if(e.id===1){Graph.duration=e.value*.005;Graph.saveView();Graph.draw();}
-      if(e.id===2){if(e.value){Graph.startNew();historyOffset=0;sweep.page=-1;}else Graph.pause();graphRevision++;}
+      if(e.id===2){if(e.value){Graph.startNew();historyOffset=0;}else Graph.pause();graphRevision++;}
       if(e.id===3){const b=buffers[modeNames[requested.page]];historyOffset=Math.max(0,Math.min(Math.max(0,b.count-requested.division*.005*R.SAMPLE_RATE),historyOffset-e.value*requested.division*.0025*R.SAMPLE_RATE));graphRevision++;}
       if(e.id>=200&&e.id<=203){Graph.channelVisible[Graph.mode][e.id-200]=!!e.value;Graph.draw();}
     }
@@ -151,19 +148,17 @@
     const ranges=Graph.ranges(),buffer=R.buffers[mode],view=Graph.views[mode],end=Graph.collecting?buffer.total:(view.end||buffer.total),span=Math.max(10,Math.round(requested.division*.005*R.SAMPLE_RATE));
     const count=Graph.activeChannels().length,channels=[],scales=[];
     const running=(requested.flags&1)!==0;
-    let cursor=0;
-    if(running){
-      const bucket=Math.floor(buffer.total*240/span);
-      if(sweep.page!==page||sweep.span!==span||sweep.channels.length!==count||bucket<sweep.bucket){sweep={page,span,bucket:Math.max(-1,bucket-240),channels:Array.from({length:count},()=>Array(240).fill(0))};}
-      for(let n=Math.max(sweep.bucket+1,bucket-239);n<=bucket;n++){
-        const pos=239-((n%240+240)%240),index=Math.min(buffer.total-1,Math.floor(n*span/240));
-        for(let ch=0;ch<count;ch++){const val=buffer.get(index,ch);sweep.channels[ch][pos]=Number.isFinite(val)?val:0;}
-      }
-      sweep.bucket=bucket;cursor=240-((bucket%240+240)%240);
-    }
+    const bucket=Math.max(0,Math.floor((buffer.total-1)*240/span));
+    const cursor=running?bucket%240+1:0;
     for(let ch=0;ch<count;ch++){
       const unit=Graph.units()[ch],scale=unit===''?1000:unit==='А'?100:10;scales.push(scale);
-      {const points=[];for(let i=0;i<240;i++){const index=end-1-(running?0:historyOffset)-span+Math.round(i*span/239),val=buffer.get(index,ch);points.push(Number.isFinite(val)?val:0);}channels.push(points);}
+      const points=[];
+      for(let i=0;i<240;i++){
+        const at=running?bucket-((bucket-i)%240+240)%240:0;
+        const index=running?Math.min(buffer.total-1,Math.floor(at*span/240)):end-1-historyOffset-span+Math.round(i*span/239);
+        const val=buffer.get(index,ch);points.push(Number.isFinite(val)?val:0);
+      }
+      channels.push(points);
     }
     Graph.mode=originalMode;
     const warningMask=(RxTelemetry.states.controls.mod==='warning'?1:0)|(RxTelemetry.states.controls.freq==='warning'?2:0)|(RxTelemetry.states.controls.limit==='warning'?4:0);
@@ -173,8 +168,8 @@
     const status=on?1:0,transition=Sim.chargeState==='charging'||discharging?2:status;
     const visual=[...mains,status,transition,transition,Sim.inverterOn||discharging&&activeDischarge?1:0,Sim.inverterOn?(warningMask?2:1):0,...Array(5).fill(status)];
     if(fault)visual.fill(0,2);
-    return {time:performance.now()/1000,state:fault?5:state,flags,visual,mode:['uf','scalar','vector'].indexOf(DriveSettings.control),selected:Encoder.order.indexOf(Sim.selected),values,pending,pendingMask,warningMask,
-      auto:{progress:R.Auto.progress,active:R.Auto.running,done:R.Auto.done,values:[.84,.71,4.3,4.3,142]},graph:{page,offsetMs:running?0:Math.round(historyOffset*1000/R.SAMPLE_RATE),division:requested.division,channels,ranges,scales,cursor,revision:graphRevision}};
+    return {time:(window.PchHostClock?window.PchHostClock.now:performance.now())/1000,state:fault?5:state,flags,visual,mode:['uf','scalar','vector'].indexOf(DriveSettings.control),selected:Encoder.order.indexOf(Sim.selected),values,pending,pendingMask,warningMask,
+      auto:{progress:R.Auto.progress,active:R.Auto.running,done:R.Auto.done,values:[.84,.71,4.3,4.3,142]},graph:{page,offsetMs:running?0:Math.round(historyOffset*1000/R.SAMPLE_RATE),division:requested.division,bucket,channels,ranges,scales,cursor,revision:graphRevision}};
   }
   async function poll(){
     if(busy)return;busy=true;
@@ -182,6 +177,6 @@
       document.getElementById('uart-connect').textContent=online?'Отключить':'Подключить';response.events.forEach(fieldEvent);
     }catch(e){stateElement.textContent=e.message;}finally{busy=false;}
   }
-  window.PchUart={network,snapshot,poll,fieldEvent,get requested(){return requested;},get activeDischarge(){return activeDischarge;}};
-  ports();setInterval(poll,100);Sim.publishTelemetry();Sim.updateUI();
+  window.PchUart={network,snapshot,poll,fieldEvent,setRequest(value){requested=value;},get requested(){return requested;},get activeDischarge(){return activeDischarge;}};
+  ports();if(!window.PchHostClock)setInterval(poll,100);Sim.publishTelemetry();Sim.updateUI();
 })();

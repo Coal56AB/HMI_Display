@@ -5,12 +5,16 @@ import threading
 from pathlib import Path
 from PySide6 import QtCore, QtWidgets, QtGui
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from native_preview import NativePreview
-from uart_server import Link, ThreadingHTTPServer, handler
+if __package__:
+    from .native_preview import NativePreview
+    from .uart_server import Link, ThreadingHTTPServer, handler
+else:
+    from native_preview import NativePreview
+    from uart_server import Link, ThreadingHTTPServer, handler
 
 
 class Desk(QtWidgets.QMainWindow):
-    def __init__(self):
+    def __init__(self, preview_factory=None, embedded=False):
         super().__init__()
         self.link = Link()
         self.server = ThreadingHTTPServer(('127.0.0.1', 0), handler(self.link))
@@ -29,8 +33,9 @@ class Desk(QtWidgets.QMainWindow):
         self.view.setMinimumWidth(430)
         self.view.setFixedSize(1,1)
         left.addWidget(self.view)
-        self.preview=NativePreview(self)
-        layout.addWidget(self.preview,1)
+        self.preview=preview_factory(self) if preview_factory else NativePreview(self)
+        if not embedded:layout.addWidget(self.preview,1)
+        self.embedded=embedded
         self.ready = False
         self.status = QtWidgets.QLabel('Инициализация модели…')
         left.addWidget(self.status)
@@ -45,6 +50,7 @@ class Desk(QtWidgets.QMainWindow):
         self.connect.clicked.connect(self.connect_port)
         row.addWidget(self.connect)
         left.addWidget(linkbox)
+        linkbox.setVisible(not embedded)
         power = QtWidgets.QGroupBox('Силовая часть · 150 Ом / 3 мФ')
         grid = QtWidgets.QGridLayout(power)
         self.charge = QtWidgets.QPushButton('ЗАРЯД')
@@ -114,12 +120,19 @@ class Desk(QtWidgets.QMainWindow):
         left.addWidget(thresholds)
 
         left.addStretch()
-        left.addWidget(QtWidgets.QLabel('Справа — интерактивный референс экрана. Заряд запускается только кнопкой.'))
+        if not embedded:left.addWidget(QtWidgets.QLabel('Справа — интерактивный референс экрана. Заряд запускается только кнопкой.'))
+        if embedded:
+            from PySide6.QtWebEngineCore import QWebEngineScript
+            script=QWebEngineScript();script.setName('editor-clock')
+            script.setInjectionPoint(QWebEngineScript.DocumentCreation)
+            script.setWorldId(QWebEngineScript.MainWorld)
+            script.setSourceCode('window.PchHostClock={now:0};')
+            self.view.page().scripts().insert(script)
         self.view.loadFinished.connect(self.loaded)
         self.view.setUrl(QtCore.QUrl(f'http://127.0.0.1:{self.server.server_port}/?desktop=1'))
         self.timer = QtCore.QTimer(self)
         self.timer.timeout.connect(self.update_status)
-        self.timer.start(20)
+        if not embedded:self.timer.start(20)
         self.ports()
 
     def js(self, code, callback=None):

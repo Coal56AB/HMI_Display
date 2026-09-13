@@ -1,0 +1,20 @@
+list(APPEND hmi_requires spi_flash esp_driver_usb_serial_jtag)
+if(CMAKE_SCRIPT_MODE_FILE)
+    return()
+endif()
+get_filename_component(pch_module "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
+execute_process(COMMAND "${PYTHON}" "${CMAKE_CURRENT_LIST_DIR}/manifest.py"
+    OUTPUT_VARIABLE pch_configuration RESULT_VARIABLE pch_result)
+if(NOT pch_result EQUAL 0)
+    message(FATAL_ERROR "Cannot read PCH module manifest: ${pch_result}")
+endif()
+# Include from the build directory so the manifest remains the only source list.
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/pch_module.cmake" "${pch_configuration}")
+include("${CMAKE_CURRENT_BINARY_DIR}/pch_module.cmake")
+list(APPEND hmi_sources "${CMAKE_CURRENT_LIST_DIR}/services.cpp")
+list(APPEND hmi_defines HMI_ROTATED_DISPLAY=1 HMI_BOOT_WIDTH=320 HMI_BOOT_HEIGHT=480)
+# The same validated resource image is embedded in the ESP firmware.
+configure_file("${CMAKE_CURRENT_LIST_DIR}/assets.S.in" "${CMAKE_CURRENT_BINARY_DIR}/pch_assets.S" @ONLY)
+set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/pch_assets.S" PROPERTIES OBJECT_DEPENDS "${pch_assets}")
+list(APPEND hmi_sources "${CMAKE_CURRENT_BINARY_DIR}/pch_assets.S")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${pch_module}/module.json" "${CMAKE_CURRENT_LIST_DIR}/manifest.py")
