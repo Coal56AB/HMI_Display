@@ -18,6 +18,8 @@ void music_box_playback_error(const char *reason);
 void music_box_saved_offset(uint32_t offset);
 void music_box_saved_range(uint8_t low,uint8_t high);
 void music_box_saved_playing(unsigned playing);
+/* Preparation is visible until STM acknowledges STREAM_START; stop clears it. */
+void music_box_saved_loading(unsigned loading);
 #ifdef __cplusplus
 }
 #endif

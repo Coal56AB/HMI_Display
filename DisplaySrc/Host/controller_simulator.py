@@ -7,8 +7,9 @@ from protocol import encode, state_packet, title_packet, MIDI_EVENT, MIDI_CLOCK
 
 
 class Controller:
-    def __init__(self):
-        self.title = 'USB: тестовая мелодия'
+    def __init__(self, midi_sink=None):
+        self.midi_sink = midi_sink
+        self.title = 'MIDI'
         self.events = []
         self.event_times = []
         self.duration = 16000
@@ -55,7 +56,7 @@ class Controller:
             # Short accents and occasional held harmony exercise mixed note lengths.
             for offset in (500,1500):note(at+offset,70,4,root+24+(bar%3)*2,105)
             if bar%4 in (0,2):note(at+250,1250,5,root+4,65)
-        self.load(events, 32500, 'USB: ритм, бас и мелодия')
+        self.load(events, 32500, 'Ритм, бас и мелодия')
 
     def load_midi(self, data, title):
         import mido
@@ -97,10 +98,12 @@ class Controller:
             if self.keys[key][0] == voice: del self.keys[key]
 
     def stop_notes(self):
+        if self.midi_sink and not self.replaying:self.midi_sink('reset',0,0,0)
         for i in range(6): self.off_voice(i,True)
         self.sustain.clear()
 
     def note(self, kind, channel, pitch, velocity=100):
+        if self.midi_sink and not self.replaying:self.midi_sink(kind,channel,pitch,velocity)
         key = (channel,pitch)
         if kind == 'cc':
             if pitch == 64:
@@ -121,6 +124,7 @@ class Controller:
                 else: self.off_voice(v)
             return
         if key in self.keys: self.off_voice(self.keys[key][0])
+        self.paused = False
         free = next((i for i,m in enumerate(self.motors) if not m['active']), None)
         if free is None:
             free = next(iter(self.keys.values()), (0,False))[0]
@@ -144,6 +148,11 @@ class Controller:
                 for event in self.events[:self.cursor]:
                     self.clock=event[0];self.note(*event[1:])
             finally: self.replaying = False;self.clock=self.position
+            if self.midi_sink:
+                for channel in self.sustain:self.midi_sink('cc',channel,64,127)
+                for (channel,pitch),(_,down) in self.keys.items():
+                    self.midi_sink('on',channel,pitch,100)
+                    if not down:self.midi_sink('off',channel,pitch,0)
         self.changes = []  # Sender reconstructs held voices after resetting the clock.
 
     def advance(self, delta):

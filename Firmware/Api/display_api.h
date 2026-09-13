@@ -10,7 +10,7 @@ typedef struct {
     uint16_t width,height;
     DisplayWriteRect write_rect;
     DisplayReadAssets read_assets;
-    /* Absolute W25Q16 offsets; writes/erases cannot overlap resource sectors. */
+    /* Byte offsets in platform storage; writes/erases cannot overlap resources. */
     int (*flash_read)(uint32_t,void *,uint32_t);
     int (*flash_write)(uint32_t,const void *,uint32_t);
     int (*flash_erase)(uint32_t);

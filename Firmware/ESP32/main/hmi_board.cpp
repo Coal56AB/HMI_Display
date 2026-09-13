@@ -4,8 +4,6 @@
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "esp_heap_caps.h"
-#include "esp_partition.h"
-#include "esp_flash.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -16,7 +14,6 @@
 volatile HmiDiagnostics hmi_debug{};
 namespace {
 spi_device_handle_t lcd, touch;
-const esp_partition_t *storage;
 uint8_t *dma_pixels;
 uint32_t last_touch;
 uint32_t last_probe;
@@ -38,7 +35,7 @@ void transfer(spi_device_handle_t device, const void *data, unsigned bytes) {
         t.flags = SPI_TRANS_USE_TXDATA;
         memcpy(t.tx_data, data, bytes);
     } else t.tx_buffer = data;
-    // Interrupt-driven DMA; waiting suspends this task, never the MIDI task.
+    // Interrupt-driven DMA; waiting suspends this task, so other tasks can run.
     if (bytes <= 64) ESP_ERROR_CHECK(spi_device_polling_transmit(device, &t));
     else ESP_ERROR_CHECK(spi_device_transmit(device, &t));
 }
@@ -94,7 +91,7 @@ void write_rect_raw(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
 void write_rect(uint16_t x,uint16_t y,uint16_t w,uint16_t h,const uint16_t *pixels,uint16_t stride,void *) {
     configASSERT(x+w<=480 && y+h<=320 && stride>=w && pixels);
     if(w<=32) {
-        // Small GUI rectangles, including exact MIDI deltas: avoid tile-splitting overhead.
+        // Small GUI rectangles, including exact pixel deltas: avoid tile-splitting overhead.
         damage.invalidate(x,y,w,h);
         write_rect_raw(x,y,w,h,pixels,stride,nullptr);
         return;
@@ -106,25 +103,10 @@ void write_rect(uint16_t x,uint16_t y,uint16_t w,uint16_t h,const uint16_t *pixe
 int scale(int raw, int low, int high, int extent) {
     return std::clamp((raw - low) * (extent - 1) / (high - low), 0, extent - 1);
 }
-bool range(uint32_t at, uint32_t count) {
-    return storage && at <= storage->size && count <= storage->size - at;
-}
-int read_flash(uint32_t at, void *data, uint32_t count) {
-    return range(at, count) && esp_partition_read(storage, at, data, count) == ESP_OK;
-}
-int read_assets(uint32_t at, void *data, uint32_t count, void *) { return read_flash(at, data, count); }
-int write_flash(uint32_t at, const void *data, uint32_t count) {
-    return at >= display_module.assets_size && range(at, count) &&
-           esp_partition_write(storage, at, data, count) == ESP_OK;
-}
-int erase_flash(uint32_t at) {
-    return !(at & 4095) && at >= display_module.assets_size && range(at, 4096) &&
-           esp_partition_erase_range(storage, at, 4096) == ESP_OK;
-}
 uint32_t now_ms() { return uint32_t(esp_timer_get_time() / 1000); }
 }
-const DisplayPlatform hmi_platform = {DISPLAY_API_VERSION, 480, 320, write_rect, read_assets,
-    read_flash, write_flash, erase_flash, now_ms, hmi_module_send, esp_restart, nullptr};
+DisplayPlatform hmi_platform = {DISPLAY_API_VERSION, 480, 320, write_rect, nullptr,
+    nullptr, nullptr, nullptr, now_ms, nullptr, esp_restart, nullptr};
 
 void hmi_boot_status(const char *label, unsigned percent, unsigned dwell_ms) {
     static bool painted=false;
@@ -193,23 +175,7 @@ void hmi_board_init() {
     spi_device_interface_config_t device{};
     device.clock_speed_hz=HMI_TOUCH_CLOCK_HZ;device.spics_io_num=-1;device.queue_size=1;
     ESP_ERROR_CHECK(spi_bus_add_device(SPI2_HOST,&device,&touch));
-    hmi_boot_status("STORAGE",25);
-    storage=esp_partition_find_first(ESP_PARTITION_TYPE_DATA,ESP_PARTITION_SUBTYPE_ANY,"hmi_store");
-    if(!storage)hmi_boot_status("STORAGE ERROR",25);
-    configASSERT(storage);
-    // The expanded song partition keeps all five old song blocks in place.
-    // Move the old UI settings before that former settings sector is reused.
-    constexpr uint32_t settings = 0xdf000, legacy_settings = 0x30f000;
-    uint8_t current[8], legacy[8];
-    if (display_module.assets_size == 0 && storage->size == 0xe0000 &&
-        esp_partition_read(storage, settings, current, sizeof(current)) == ESP_OK &&
-        std::all_of(current, current + sizeof(current), [](uint8_t b){return b == 255;}) &&
-        esp_flash_read(nullptr, legacy, legacy_settings, sizeof(legacy)) == ESP_OK &&
-        legacy[0] == 'M' && legacy[1] == 'B' && legacy[2] == 1) {
-        // The UI validates the settings CRC before applying them.
-        ESP_ERROR_CHECK(esp_partition_erase_range(storage, settings, 4096));
-        ESP_ERROR_CHECK(esp_partition_write(storage, settings, legacy, sizeof(legacy)));
-    }
+
 }
 void hmi_touch_poll(uint32_t now) {
     if (now - last_touch < HMI_TOUCH_POLL_MS) return;

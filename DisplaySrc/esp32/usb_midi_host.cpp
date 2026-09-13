@@ -6,6 +6,10 @@
 #include "driver/gpio.h"
 #include "esp_timer.h"
 #include "esp_check.h"
+#include "controller_link.h"
+#include "ui_bridge.h"
+#include <cstring>
+#include <atomic>
 
 namespace {
 MidiSink sink;
@@ -18,6 +22,21 @@ bool in_flight[2] = {}, closing=false, halted=false, claimed=false;
 uint8_t new_address=0, retry_address=0;
 int64_t retry_at=0;
 unsigned debug_level=0;
+std::atomic<bool> stopping{false}, running{false}, client_done{false};
+void publish_name(const usb_str_desc_t *desc) {
+    char name[49]{};unsigned used=0;
+    if(desc&&desc->bLength>=2)for(unsigned i=0;i<(desc->bLength-2u)/2;++i) {
+        unsigned c=desc->wData[i];if(c<32||c==127)continue;
+        if(c>=0xd800&&c<=0xdfff)c='?';
+        unsigned n=c<128?1:c<2048?2:3;if(used+n>48)break;
+        if(n==1)name[used++]=char(c);
+        else {if(n==3)name[used++]=char(0xe0|(c>>12));
+              name[used++]=char((n==2?0xc0:0x80)|((c>>6)&(n==2?31:63)));
+              name[used++]=char(0x80|(c&63));}
+    }
+    if(!used){strcpy(name,"USB MIDI");used=8;}
+    ui_bridge::music_box_midi_name(name);
+}
 void reset_music() {sink({music::Type::Reset,0,0,0,uint64_t(esp_timer_get_time())});}
 void request_close() {
     if(!closing) {closing=true;connection(false);reset_music();}
@@ -68,6 +87,8 @@ void open_device(uint8_t address) {
         in_flight[i]=true;
     }
     connection(true);
+    usb_device_info_t info{};
+    publish_name(usb_host_device_info(device,&info)==ESP_OK?info.str_desc_product:nullptr);
 }
 void host_task(void *) {
     usb_host_client_config_t config={};config.max_num_event_msg=8;
@@ -75,6 +96,7 @@ void host_task(void *) {
     ESP_ERROR_CHECK(usb_host_client_register(&config,&client));
     for(;;) {
         usb_host_client_handle_events(client,pdMS_TO_TICKS(10));
+        if(stopping) {new_address=retry_address=0;request_close();}
         if(closing && device) {
             if(!halted) {
                 usb_host_endpoint_halt(device,endpoint.address);
@@ -88,6 +110,10 @@ void host_task(void *) {
                 closing=halted=claimed=false;retry_at=esp_timer_get_time()+100000;
             }
         }
+        if(stopping && !device) {
+            ESP_ERROR_CHECK(usb_host_client_deregister(client));client=nullptr;
+            client_done=true;vTaskDelete(nullptr);return;
+        }
         if(!device && new_address) {uint8_t a=new_address;new_address=0;open_device(a);}
         else if(!device && retry_address && esp_timer_get_time()>=retry_at) {
             uint8_t a=retry_address;retry_address=0;open_device(a);
@@ -95,10 +121,29 @@ void host_task(void *) {
     }
 }
 void daemon_task(void *) {
-    for(;;) {uint32_t flags;usb_host_lib_handle_events(portMAX_DELAY,&flags);}
+    bool freeing=false,freed=false;
+    for(;;) {
+        uint32_t flags=0;usb_host_lib_handle_events(pdMS_TO_TICKS(10),&flags);
+        if(stopping && client_done) {
+            if(!freeing) {
+                const esp_err_t result=usb_host_device_free_all();
+                freeing=result==ESP_OK||result==ESP_ERR_NOT_FINISHED;
+                freed=result==ESP_OK;
+            }
+            if(flags&USB_HOST_LIB_EVENT_FLAGS_ALL_FREE)freed=true;
+            if(freed && usb_host_uninstall()==ESP_OK) {
+                if(USB_VBUS_ENABLE_PIN>=0)
+                    gpio_set_level(gpio_num_t(USB_VBUS_ENABLE_PIN),!USB_VBUS_ENABLE_LEVEL);
+                running=false;vTaskDelete(nullptr);return;
+            }
+        }
+    }
 }
 }
 void usb_midi_start(MidiSink callback, MidiConnection state_callback) {
+    configASSERT(!running);
+    stopping=false;client_done=false;
+    closing=halted=claimed=false;new_address=retry_address=0;retry_at=0;
     sink=callback;
     connection=state_callback;
     if(MIDI_DEBUG_ENABLED) {gpio_reset_pin(gpio_num_t(MIDI_DEBUG_PIN));gpio_set_direction(gpio_num_t(MIDI_DEBUG_PIN),GPIO_MODE_OUTPUT);}
@@ -108,6 +153,9 @@ void usb_midi_start(MidiSink callback, MidiConnection state_callback) {
     }
     usb_host_config_t config={};config.intr_flags=ESP_INTR_FLAG_LEVEL1;
     ESP_ERROR_CHECK(usb_host_install(&config));
+    running=true;
     configASSERT(xTaskCreatePinnedToCore(daemon_task,"usb-library",4096,nullptr,22,nullptr,0)==pdPASS);
     configASSERT(xTaskCreatePinnedToCore(host_task,"usb-midi",4096,nullptr,21,nullptr,0)==pdPASS);
 }
+void usb_midi_stop() {if(running)stopping=true;}
+bool usb_midi_stopped() {return !running.load();}

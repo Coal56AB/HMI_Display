@@ -1,5 +1,8 @@
 #include "controller_link.h"
 #include "note_set_wire.h"
+#ifdef MUSIC_BOX_CONTROLLER
+#include "midi_app.h"
+#endif
 #include <cstring>
 namespace control {
 unsigned encode(uint8_t *out, uint8_t command, const uint8_t *payload, unsigned length, uint8_t sequence) {
@@ -13,11 +16,14 @@ unsigned encode(uint8_t *out, uint8_t command, const uint8_t *payload, unsigned 
 static uint32_t get32(const uint8_t *p) {
     return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24;
 }
-static bool state_valid(const uint8_t *p) {
-    if (p[0] != 1 || p[1] > 127 || p[2] > 1 || p[3] > 1 || p[4] > 7 || p[5] > 63) return false;
+static bool state_valid(const uint8_t *p, unsigned length) {
+    if (!((p[0]==1&&length==50)||(p[0]==2&&length==86)||(p[0]==3&&length==94)) || p[1] > 127 || p[2] > 1 || p[3] > 1 || p[4] > 7 || p[5] > 63) return false;
     for (unsigned m = 0; m < 6; ++m) {
         if (p[14 + 6*m] > 31 || (p[15 + 6*m] > 127 && p[15 + 6*m] != 255) ||
             get32(p + 16 + 6*m) > 4000000) return false;
+    }
+    if(p[0]>=2)for(unsigned m=0;m<6;++m) {
+        if(p[50+6*m]>7 || (p[51+6*m]>127&&p[51+6*m]!=255) || get32(p+52+6*m)>1200000)return false;
     }
     return true;
 }
@@ -33,7 +39,7 @@ bool Link::select(uint32_t now) {
         for (unsigned i = 0; i < 4; ++i) payload[i] = uint8_t(input.clock >> (i * 8));
         ui(bytes, encode(bytes, 0x43, payload, 4));
         ui(bytes, encode(bytes, 0x44, input.range, 2));
-        ui(input.state, 57);
+        ui(input.state, unsigned(input.state[2])+7);
         if (input.title_length) ui(input.title, input.title_length);
         // Reconstruct held notes when taking over; inactive transport history is not replayed.
         for (unsigned m = 0; m < 6; ++m) {
@@ -47,12 +53,31 @@ bool Link::select(uint32_t now) {
     return true;
 }
 void Link::tick(uint32_t now) { select(now); }
+void Link::disconnect(Source source,uint32_t now) {
+    if(source<Uart||source>Midi)return;
+    inputs[source-1]=Input{};
+    select(now);
+}
 void Link::frame(Source source, const uint8_t *bytes, unsigned count, uint32_t now) {
     auto &input = inputs[source - 1];
     const unsigned command = bytes[4], length = bytes[2];
-    if (command == 0x40 && length == 50 && state_valid(bytes + 5)) {
+    // Live events are an input to STM32, independent of the selected UI source.
+    // Keep the original sequence/CRC so the PC can retry until STM32 ACKs it.
+    if(source==Usb && command==0x56 && length>=1 && length<=201 && (length-1)%10==0) {
+        send(Uart,bytes,count);return;
+    }
+    if(source==Uart && command==0x57 && length==1) {
+        send(Usb,bytes,count);
+#ifdef MUSIC_BOX_CONTROLLER
+        midi_app_ack(bytes[3],bytes[5]);
+#endif
+        return;
+    }
+    if (command == 0x40 && (length == 50 || length == 86 || length == 94) && state_valid(bytes + 5,length)) {
         memcpy(input.state, bytes, count); input.last_state = now; input.alive = true;
         if (!select(now) && selected == source) ui(bytes, count);
+    } else if (command == 0x45 && length >= 5 && length <= 165) {
+        if(selected==source)ui(bytes,count);
     } else if (command == 0x44 && length == 2) {
         memcpy(input.range, bytes + 5, 2);
         if (selected == source) ui(bytes, count);

@@ -2,7 +2,7 @@
 #include "song_wire.h"
 #include "half_duplex_wire.h"
 #include "controller_link.h"
-#include "music_box_control.h"
+#include "ui_bridge.h"
 #include "esp_link.h"
 #include "esp_partition.h"
 #include "freertos/FreeRTOS.h"
@@ -29,10 +29,13 @@ bool progress_active;
 bool playing=false,stopping=false;
 bool boot_done=false,boot_testing=false;uint32_t boot_started=0;
 unsigned selected=0,setup_step=0,event_index=0,free_events=256;
+unsigned queue_capacity=256;
 uint32_t poll_at=0,rpc_at=0,rpc_wait_at=0,last_tick=0;
 bool rpc_waiting=false;
 uint8_t rpc[208],rpc_length=0,rpc_seq=0,rpc_command=0;unsigned rpc_count=0,rpc_tries=0;
 bool started=false,seek_ready=true,rpc_resume=false;
+uint32_t buffered_until=0,rpc_until=0;
+bool buffered_complete=false,rpc_complete=false;
 uint32_t play_offset=0,seek_notes[6]{};
 uint8_t resume_events[60];unsigned resume_count=0,resume_index=0;
 unsigned range_index=0;
@@ -41,7 +44,7 @@ bool range_ready=false;
 
 uint32_t read32(const uint8_t*p){return song_u32(p);}
 uint32_t checksum(const void*p,unsigned n){return ~song_crc(0xffffffffu,(const uint8_t*)p,n);}
-bool valid(const Header &h) {return h.magic==magic&&h.slot<SONG_SLOT_COUNT&&h.count>0&&h.count<=SONG_MAX_EVENTS&&h.check==checksum(&h,60);}
+bool valid(const Header &h) {return h.magic==magic&&h.slot<SONG_SLOT_COUNT&&h.count>0&&h.count<=SONG_MAX_EVENTS&&h.reserved<=1&&h.check==checksum(&h,60);}
 void refresh() {
     memset(catalog,0,sizeof(catalog));for(auto &p:physical)p=-1;
     if(!partition)return;
@@ -50,25 +53,25 @@ void refresh() {
             (physical[h.slot]<0||h.generation>catalog[h.slot].generation)) {catalog[h.slot]=h;physical[h.slot]=i;}
     }
 }
-void show_catalog() {for(unsigned i=0;i<SONG_SLOT_COUNT;i++)music_box_saved_song(i,catalog[i].title,physical[i]>=0,catalog[i].duration);}
+void show_catalog() {for(unsigned i=0;i<SONG_SLOT_COUNT;i++)ui_bridge::music_box_saved_song(i,catalog[i].title,physical[i]>=0,catalog[i].duration);}
 void report(const Request &r,uint8_t error,uint8_t stage,uint8_t percent,uint32_t offset) {
     Reply reply{};reply.seq=r.seq;reply.data[0]=r.data[0];reply.data[1]=error;
     reply.data[2]=stage;reply.data[3]=percent;song_put32(reply.data+4,offset);
     xQueueSend(replies,&reply,portMAX_DELAY);
 }
 void worker(void*) {
-    Header incoming{};int target=-1;uint32_t offset=0,total=0,last_at=0;bool ended=false;
+    Header incoming{};int target=-1;uint32_t offset=0,total=0,last_at=0;bool ended=false,group_open=false;
     Request r{};
     for(;;) {
         xQueueReceive(requests,&r,portMAX_DELAY);
         uint8_t error=0,stage=2,percent=10;const uint8_t *p=r.data+1;unsigned n=r.len-1;
         if(!partition)error=4;
         else if(r.data[0]==SONG_BEGIN) {
-            target=-1;offset=0;ended=false;last_at=0;
-            if(n!=48||p[0]>=SONG_SLOT_COUNT||!read32(p+1)||read32(p+1)>SONG_MAX_EVENTS||!p[13]||p[13]>63||p[14]>7||p[15]>63)error=3;
+            target=-1;offset=0;ended=group_open=false;last_at=0;
+            if((n!=48&&n!=49)||(n==49&&p[48]!=1)||p[0]>=SONG_SLOT_COUNT||!read32(p+1)||read32(p+1)>SONG_MAX_EVENTS||!p[13]||p[13]>63||p[14]>7||p[15]>63)error=3;
             else {
                 refresh();incoming={};incoming.magic=magic;incoming.slot=p[0];incoming.count=read32(p+1);
-                incoming.duration=read32(p+5);incoming.crc=read32(p+9);incoming.mask=p[13];incoming.raw=p[14];incoming.dirs=p[15];
+                incoming.duration=read32(p+5);incoming.crc=read32(p+9);incoming.mask=p[13];incoming.raw=p[14];incoming.dirs=p[15];incoming.reserved=n==49?1:0;
                 memcpy(incoming.title,p+16,32);incoming.title[31]=0;incoming.generation=1;
                 for(const auto &h:catalog)if(h.generation>=incoming.generation)incoming.generation=h.generation+1;
                 for(unsigned i=0;i<SONG_SLOT_COUNT+1;i++){bool used=false;for(int j:physical)if((int)i==j)used=true;if(!used){target=(int)i;break;}}
@@ -86,10 +89,22 @@ void worker(void*) {
             else {
                 for(unsigned i=4;i<n;i+=10) {
                     uint32_t at=read32(p+i),value=read32(p+i+6);uint8_t m=p[i+4],op=p[i+5];
-                    if(ended||at<last_at||at>86400000u||op>2||
-                       (op==2?(m!=255||value!=0||offset+i-4+10!=total):
-                       (m>=6||!(incoming.mask&(1u<<m))||(op==0?value!=0:value<20000||value>4000000)))){error=3;break;}
-                    last_at=at;ended=op==2;
+                    if(incoming.reserved) {
+                        uint8_t kind=op&127;
+                        if(ended||at<last_at||(group_open&&at!=last_at)||at>86400000u||kind>5||kind==4||
+                           ((value>>24)>127)||((value&255)>127)||(((value>>8)&255)>127)||(((value>>16)&255)>6)||
+                           (kind==5&&(offset+i-4!=0||at||m!=incoming.mask||!(op&128)||(value&255)<1||(value&255)>6||((value>>8)&255)>7||(value>>16)))||
+                           (offset+i-4==0&&kind!=5)||
+                           (kind==3&&(group_open||!(op&128)||m||value||offset+i-4+10!=total))){error=3;break;}
+                        ended=kind==3;
+                        group_open=!(op&128);
+                    } else {
+                        if(ended||at<last_at||at>86400000u||op>2||
+                           (op==2?(m!=255||value!=0||offset+i-4+10!=total):
+                           (m>=6||!(incoming.mask&(1u<<m))||(op==0?value!=0:value<20000||value>4000000)))){error=3;break;}
+                        ended=op==2;
+                    }
+                    last_at=at;
                 }
                 if(!error && esp_partition_write(partition,target*SONG_SLOT_BYTES+SONG_DATA_OFFSET+offset,p+4,n-4)!=ESP_OK)error=9;
                 if(!error)offset+=n-4;
@@ -128,20 +143,21 @@ void command(uint8_t cmd,const uint8_t *p=nullptr,unsigned n=0) {
     rpc_at=rpc_wait_at=last_tick;rpc_waiting=true;
     rpc_tries=esp_link_send(rpc,rpc_length)?1:0;
 }
-void stop() {playing=false;stopping=true;rpc_length=0;command(4);music_box_saved_playing(false);}
+void stop() {playing=false;stopping=true;rpc_length=0;command(4);ui_bridge::music_box_saved_playing(false);}
 void playback_failed(unsigned error) {
-    playing=stopping=boot_testing=false;rpc_length=0;music_box_saved_playing(false);
+    playing=stopping=boot_testing=false;rpc_length=0;ui_bridge::music_box_saved_playing(false);
     const char *reason=error==12?"Управление занято программой ПК":
         error==2?"Обновите прошивку STM32":
         error==8?"STM32: тайм-аут управления":
-        error==4?"STM32 отклонила настройку моторов":
+        error==4?"STM: недопустимое состояние":
         error==5?"Переполнена очередь нот":
         error==6?"Ноты поступили слишком поздно":
         error==10?"Не хватило данных мелодии":
         error==9?"Ошибка линии UART":
         error==11?"Пропущен импульс мотора":
         "Повреждены данные мелодии";
-    music_box_playback_error(reason);
+    char detail[128];snprintf(detail,sizeof(detail),"E%u: %s",error,reason);
+    ui_bridge::music_box_playback_error(detail);
 }
 void on_frame(const uint8_t*b,unsigned n) {
     if(b[4]==SONG_RELAY&&b[2]>=1&&b[2]<=192) {
@@ -154,18 +170,26 @@ void on_frame(const uint8_t*b,unsigned n) {
         if(playing||stopping){Reply reject{};reject.seq=r.seq;reject.data[0]=r.data[0];reject.data[1]=4;reject.data[2]=6;send_reply(reject);return;}
         if(xQueueSend(requests,&r,0)==pdTRUE) {
             last_request=r;request_valid=request_busy=true;progress_active=true;upload_open=true;
-            if(r.data[0]==SONG_BEGIN)music_box_save_progress(1,0);
+            if(r.data[0]==SONG_BEGIN)ui_bridge::music_box_save_progress(1,0);
         }
     } else if(b[4]==SONG_ENGINE_REPLY&&rpc_length&&b[3]==rpc_seq&&b[2]>=2&&b[5]==rpc_command) {
         rpc_length=0;
         if(b[6]) {playback_failed(b[6]);return;}
         if(stopping){stopping=false;boot_testing=false;return;}
         if(!playing)return;
-        if(rpc_command==18&&b[2]==4){if(rpc_resume)resume_index+=rpc_count;else event_index+=rpc_count;free_events=b[7]|unsigned(b[8])<<8;}
+        if((rpc_command==18||rpc_command==22)&&b[2]==4){
+            if(rpc_resume)resume_index+=rpc_count;
+            else {event_index+=rpc_count;buffered_until=rpc_until;buffered_complete=rpc_complete;}
+            free_events=b[7]|unsigned(b[8])<<8;
+        }
         else if(rpc_command==3&&b[2]==54) {
-            free_events=256-(b[13]|unsigned(b[14])<<8);
+            unsigned used=b[13]|unsigned(b[14])<<8;
+            free_events=used<queue_capacity?queue_capacity-used:0;
+            if(catalog[selected].reserved)free_events=free_events/13?free_events/13-1:0;
             if(started&&!b[11]){if(b[12])playback_failed(b[12]);else stop();}
-        } else if(rpc_command==16)started=true;
+        } else if(rpc_command==20&&b[2]==4) {
+            queue_capacity=free_events=b[7]|unsigned(b[8])<<8;
+        } else if(rpc_command==16){started=true;ui_bridge::music_box_saved_loading(false);}
     }
     (void)n;
 }
@@ -178,10 +202,10 @@ void song_store_start() {
 }
 bool song_store_busy(){return playing||stopping||upload_open||boot_testing;}
 void song_store_boot(bool ready,bool pc_connected) {
-    if(boot_done||!ready||!music_box_screen_ready())return;
+    if(boot_done||!ready||!ui_bridge::music_box_screen_ready())return;
     boot_done=true;
     if(pc_connected||request_busy)return;
-    boot_testing=true;boot_started=0;music_box_save_progress(5,0);command(21);
+    boot_testing=true;boot_started=0;ui_bridge::music_box_save_progress(5,0);command(21);
 }
 bool song_store_action(unsigned action,unsigned slot,uint32_t position) {
     if(action==0&&(playing||boot_testing)){boot_testing=false;stop();return true;}
@@ -191,11 +215,12 @@ bool song_store_action(unsigned action,unsigned slot,uint32_t position) {
     if(seeking)slot=selected;
     if(slot>=SONG_SLOT_COUNT||physical[slot]<0||upload_open||boot_testing)return true;
     selected=slot;playing=true;started=false;event_index=setup_step=0;free_events=256;rpc_length=0;poll_at=0;
-    if(!seeking){range_index=0;range_low=255;range_high=0;range_ready=false;music_box_saved_range(255,255);}
+    buffered_until=0;buffered_complete=false;
+    if(!seeking){range_index=0;range_low=255;range_high=0;range_ready=false;ui_bridge::music_box_saved_range(255,255);}
     play_offset=seeking?position:0;
     if(catalog[slot].duration&&play_offset>=catalog[slot].duration)play_offset=catalog[slot].duration-1;
-    seek_ready=play_offset==0;resume_count=resume_index=0;memset(seek_notes,0,sizeof(seek_notes));
-    music_box_saved_offset(play_offset);music_box_saved_playing(true);return true;
+    seek_ready=play_offset==0||catalog[slot].reserved;resume_count=resume_index=0;memset(seek_notes,0,sizeof(seek_notes));
+    ui_bridge::music_box_saved_offset(play_offset);ui_bridge::music_box_saved_playing(true);ui_bridge::music_box_saved_loading(true);return true;
 }
 void song_store_feed(uint8_t byte) {
     if(parser_n==sizeof(parser)){memmove(parser,parser+1,--parser_n);}
@@ -215,18 +240,18 @@ void song_store_tick(uint32_t now) {
     last_tick=now;
     static bool shown=false;if(!shown){show_catalog();shown=true;}
     Reply r{};while(xQueueReceive(replies,&r,0)==pdTRUE) {
-        last_reply=r;music_box_save_progress(r.data[2],r.data[3]);progress_at=now;send_reply(r);
+        last_reply=r;ui_bridge::music_box_save_progress(r.data[2],r.data[3]);progress_at=now;send_reply(r);
         if(r.data[1]!=255){request_busy=false;if(r.data[1]||r.data[0]==SONG_COMMIT)upload_open=false;if(r.data[2]==4){refresh();show_catalog();}}
     }
-    if(upload_open&&!request_busy&&now-progress_at>10000){upload_open=false;music_box_save_progress(6,last_reply.data[3]);}
-    if(progress_active&&!upload_open&&!request_busy&&now-progress_at>15000){progress_active=false;music_box_save_progress(0,0);}
+    if(upload_open&&!request_busy&&now-progress_at>10000){upload_open=false;ui_bridge::music_box_save_progress(6,last_reply.data[3]);}
+    if(progress_active&&!upload_open&&!request_busy&&now-progress_at>15000){progress_active=false;ui_bridge::music_box_save_progress(0,0);}
     if(rpc_length) {
         if(!rpc_waiting){rpc_waiting=true;rpc_wait_at=now;rpc_at=now-100;}
         if(now-rpc_wait_at>=2000) {
             char reason[128];
             snprintf(reason,sizeof(reason),rpc_tries?"Нет ACK команды %u (пакетов %u)":"Очередь UART занята: команда %u (%u)",rpc_command,rpc_tries);
             playing=stopping=boot_testing=false;rpc_length=0;
-            music_box_saved_playing(false);music_box_playback_error(reason);return;
+            ui_bridge::music_box_saved_playing(false);ui_bridge::music_box_playback_error(reason);return;
         }
         if(now-rpc_at>=100) {
             rpc_at=now;
@@ -236,8 +261,8 @@ void song_store_tick(uint32_t now) {
     }
     if(boot_testing) {
         if(!boot_started)boot_started=now;
-        if(now-boot_started>=2200){boot_testing=false;stop();music_box_save_progress(0,0);}
-        else if(now-poll_at>=50){poll_at=now;music_box_save_progress(5,(now-boot_started)*100/2200);command(3);}
+        if(now-boot_started>=4600){boot_testing=false;stop();ui_bridge::music_box_save_progress(0,0);}
+        else if(now-poll_at>=50){poll_at=now;ui_bridge::music_box_save_progress(5,(now-boot_started)*100/4600);command(3);}
         return;
     }
     if(!playing)return;
@@ -245,37 +270,40 @@ void song_store_tick(uint32_t now) {
     if(!range_ready && setup_step>0) {
         // Inspect the entire stored song before playback, in bounded UI-friendly blocks.
         uint8_t scan[640];unsigned count=h.count-range_index;if(count>64)count=64;
-        if(esp_partition_read(partition,physical[selected]*SONG_SLOT_BYTES+SONG_DATA_OFFSET+range_index*10,scan,count*10)!=ESP_OK){stop();music_box_playback_error("Ошибка чтения памяти");return;}
-        for(unsigned i=0;i<count;++i)if(scan[i*10+5]==1) {
+        if(esp_partition_read(partition,physical[selected]*SONG_SLOT_BYTES+SONG_DATA_OFFSET+range_index*10,scan,count*10)!=ESP_OK){stop();ui_bridge::music_box_playback_error("Ошибка чтения памяти");return;}
+        for(unsigned i=0;i<count;++i)if(h.reserved?(scan[i*10+5]&127)==0:scan[i*10+5]==1) {
             uint32_t frequency=read32(scan+i*10+6);
             if(frequency) {
-                int note=(int)lroundf(69.0f+12.0f*log2f(frequency/440000.0f));
+                int note=h.reserved?scan[i*10+6]:(int)lroundf(69.0f+12.0f*log2f(frequency/440000.0f));
                 if(note>=0&&note<128){if(note<range_low)range_low=note;if(note>range_high)range_high=note;}
             }
         }
         range_index+=count;
-        if(range_index==h.count){range_ready=true;music_box_saved_range(range_low,range_high);}
+        if(range_index==h.count){range_ready=true;ui_bridge::music_box_saved_range(range_low,range_high);}
         if(now-poll_at>=100){poll_at=now;command(3);}
         return;
     }
-    if(setup_step<18) {
+    if(setup_step<19) {
         unsigned s=setup_step++;
         if(s==0)command(4);
         else if(s==1){p[0]=h.mask;command(5,p,1);}
-        else if(s==2){p[0]=h.raw;command(12,p,1);}
+        else if(s==2){/* Microstep is a controller setting, never a song setting. */}
         else if(s==3)command(14,p,1);
         else if(s==4)command(13,p,1);
-        else if(s<17){unsigned m=(s-5)/2;if(!(h.mask&(1u<<m)))return;p[0]=m;p[1]=(s&1)?((h.dirs>>m)&1):((h.mask>>m)&1);command((s&1)?11:6,p,2);}
-        else command(19);
+        else if(s<17){unsigned m=(s-5)/2;if(!(s&1)||!(h.mask&(1u<<m)))return;p[0]=m;p[1]=(h.dirs>>m)&1;command(11,p,2);}
+        else if(s==17)command(19);
+        else command(20);
+    } else if(h.reserved&&setup_step==19) {
+        ++setup_step;free_events=queue_capacity/13?queue_capacity/13-1:0;song_put32(p,play_offset);command(23,p,4);
     } else if(!seek_ready) {
         // Scan bounded blocks while stopped, keeping the UI responsive.
         uint8_t scan[640];unsigned count=h.count-event_index;if(count>64)count=64;
-        if(!count || esp_partition_read(partition,physical[selected]*SONG_SLOT_BYTES+SONG_DATA_OFFSET+event_index*10,scan,count*10)!=ESP_OK){stop();music_box_playback_error("Ошибка чтения памяти");return;}
+        if(!count || esp_partition_read(partition,physical[selected]*SONG_SLOT_BYTES+SONG_DATA_OFFSET+event_index*10,scan,count*10)!=ESP_OK){stop();ui_bridge::music_box_playback_error("Ошибка чтения памяти");return;}
         unsigned i=0;
         for(;i<count;++i) {
             const uint8_t *e=scan+i*10;uint32_t at=read32(e);
             if(at>=play_offset||e[5]==2) {
-                if(e[5]==2&&at<play_offset){play_offset=at;music_box_saved_offset(at);}
+                if(e[5]==2&&at<play_offset){play_offset=at;ui_bridge::music_box_saved_offset(at);}
                 seek_ready=true;break;
             }
             if(e[4]<6)seek_notes[e[4]]=e[5]==1?read32(e+6):0;
@@ -288,12 +316,18 @@ void song_store_tick(uint32_t now) {
     } else if(resume_index<resume_count) {
         rpc_resume=true;rpc_count=resume_count-resume_index;if(rpc_count>4)rpc_count=4;
         command(18,resume_events+resume_index*10,rpc_count*10);
-    } else if(event_index<h.count && free_events>=4 && (!started||free_events>64)) {
-        // Keep requests within 48 bytes; enqueue immediately on each preceding ACK.
-        rpc_count=h.count-event_index;if(rpc_count>4)rpc_count=4;
-        if(esp_partition_read(partition,physical[selected]*SONG_SLOT_BYTES+SONG_DATA_OFFSET+event_index*10,p,rpc_count*10)!=ESP_OK){stop();music_box_playback_error("Ошибка чтения памяти");return;}
-        for(unsigned i=0;i<rpc_count;++i)song_put32(p+i*10,read32(p+i*10)-play_offset);
-        rpc_resume=false;command(18,p,rpc_count*10);
+    } else if(!started && buffered_complete && buffered_until>=play_offset+2000u) {
+        // Prefill two seconds (or the available capacity), then keep filling.
+        command(16);
+    } else if(event_index<h.count && free_events>0) {
+        // Keep planner work bounded by the half-duplex reply deadline.
+        // Fitting the byte limit does not mean a large MIDI batch can finish in 3 ms.
+        rpc_count=h.count-event_index;if(rpc_count>4)rpc_count=4;if(rpc_count>free_events)rpc_count=free_events;
+        if(esp_partition_read(partition,physical[selected]*SONG_SLOT_BYTES+SONG_DATA_OFFSET+event_index*10,p,rpc_count*10)!=ESP_OK){stop();ui_bridge::music_box_playback_error("Ошибка чтения памяти");return;}
+        rpc_until=read32(p+(rpc_count-1)*10);
+        rpc_complete=!h.reserved || !!(p[(rpc_count-1)*10+5]&128);
+        if(!h.reserved)for(unsigned i=0;i<rpc_count;++i)song_put32(p+i*10,read32(p+i*10)-play_offset);
+        rpc_resume=false;command(h.reserved?22:18,p,rpc_count*10);
     } else if(!started)command(16);
-    else if(now-poll_at>=50){poll_at=now;command(3);}
+    else if(now-poll_at>=10){poll_at=now;command(3);}
 }

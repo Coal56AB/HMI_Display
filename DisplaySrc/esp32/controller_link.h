@@ -15,6 +15,7 @@ public:
     Link(FrameSink ui, SourceSink changed, SendSink send): ui(ui), changed(changed), send(send) {}
     void feed(Source source, uint8_t byte, uint32_t now);
     void tick(uint32_t now);
+    void disconnect(Source source,uint32_t now);
     void action(const uint8_t *frame, unsigned length, uint32_t now);
     Source active() const { return selected; }
     uint8_t source_flags(Source source, uint32_t now) const {
@@ -25,7 +26,7 @@ public:
     static constexpr uint32_t lease_ms = 500;
 private:
     struct Input {
-        uint8_t bytes[247]{}, state[57]{}, title[55]{}, range[2]{255,255};
+        uint8_t bytes[247]{}, state[101]{}, title[55]{}, range[2]{255,255};
         unsigned used = 0, title_length = 0;
         uint32_t last_byte = 0, last_state = 0, clock = 0;
         bool alive = false;

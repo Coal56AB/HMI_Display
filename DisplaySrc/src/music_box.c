@@ -1,5 +1,5 @@
 /* Music box UI, display API v2. No HAL, dynamic allocation or framebuffer. */
-#include "display_api.h"
+#include "display_renderer.h"
 #include "font.h"
 #include <stdint.h>
 #include <stdio.h>
@@ -19,8 +19,7 @@
 #define SETTINGS_ADDR 0x0df000u
 #define SAVED_SONG_COUNT 10u
 #define RX_SIZE 512u
-#define NOTES 96u
-#define DIRTY 32u
+#define NOTES 1024u
 #ifndef MUSIC_BOX_BAND
 #define MUSIC_BOX_BAND 2
 #endif
@@ -36,15 +35,11 @@
 #ifndef MUSIC_BOX_PIXEL_MIDI
 #define MUSIC_BOX_PIXEL_MIDI 0
 #endif
-#define BAND MUSIC_BOX_BAND
 
 typedef struct {
   uint32_t mhz;
   uint8_t flags, note;
 } Motor;
-typedef struct {
-  int16_t x, y, w, h;
-} Rect;
 typedef struct {
   uint32_t start, end;
   uint8_t motor, pitch, open, used;
@@ -53,10 +48,8 @@ static const DisplayPlatform *p;
 static Motor motors[6];
 /* Overview presentation only. Raw motor state and MIDI history stay immediate. */
 static Motor overview[6];
-static uint32_t overview_started[6], overview_off[6];
-static uint8_t overview_was_active[6];
-#define OVERVIEW_MIN_MS 1000u
-#define OVERVIEW_GAP_MS 1000u
+static Motor controller_overview[6];
+static uint8_t controller_overview_ready;
 static uint8_t flags, sleeping, resetting, micro,
     mask = 63, page, selected, settings_page, show_hz, width_index = 2;
 static const uint8_t widths[3] = {25, 50, 100};
@@ -68,33 +61,36 @@ static uint32_t midi_tail_ms;
 static uint8_t midi_source_valid, midi_stop_latched, midi_input_running;
 static uint8_t have_state;
 static char title[49] = "Нет композиции", notice[48];
+static char midi_device_name[49]="USB MIDI";
 static uint32_t notice_until;
 static MidiNote notes[NOTES];
 static unsigned note_next;
+static MidiNote *midi_note_slot(uint32_t at) {
+  MidiNote *oldest=0;int32_t oldest_age=INT32_MIN;
+  for(unsigned count=0;count<NOTES;++count) {
+    unsigned index=(note_next+count)%NOTES;MidiNote *n=&notes[index];
+    int32_t age=(int32_t)(at-n->end);
+    if(!n->used||(!n->open&&age>8000)) {note_next=(index+1)%NOTES;return n;}
+    // Evict by END time only. An old onset may belong to a long active note.
+    if(!n->open&&age>oldest_age){oldest=n;oldest_age=age;}
+  }
+  return oldest;
+}
 static const uint16_t voice_colors[6] = {
     RGB(106, 201, 255), RGB(189, 157, 255), RGB(118, 223, 187),
     RGB(255, 206, 115), RGB(249, 148, 194), RGB(143, 169, 255)};
 #if MUSIC_BOX_PIXEL_MIDI
-// Exact previous MIDI image: 4 bits/pixel for its 12 RGB565 colours, no hashes.
-// 15 means unknown. Other pages invalidate this cache before entering MIDI again.
-static uint8_t midi_image[480 * 210 / 2];
-static uint8_t midi_image_valid;
-static uint8_t midi_changed[(480*MUSIC_BOX_BAND+7)/8];
-static int midi_changed_at(unsigned i){return (midi_changed[i/8]>>(i%8))&1;}
-static void midi_mark(unsigned i){midi_changed[i/8]|=(uint8_t)(1u<<(i%8));}
-static void midi_unmark(unsigned i){midi_changed[i/8]&=(uint8_t)~(1u<<(i%8));}
-static unsigned midi_pixel_code(uint16_t color) {
-  static const uint16_t colors[] = {BG,PANEL,BTN,MUTED,WHITE,TEXT,
+#define UI_CACHE_BYTES (480 * 210 / 2)
+static const uint16_t midi_palette[] = {BG,PANEL,BTN,MUTED,WHITE,TEXT,
     RGB(106,201,255),RGB(189,157,255),RGB(118,223,187),
     RGB(255,206,115),RGB(249,148,194),RGB(143,169,255)};
-  for(unsigned i=0;i<sizeof(colors)/sizeof(colors[0]);++i)
-    if(colors[i]==color)return i;
-  return 15;
-}
+#else
+#define UI_CACHE_BYTES 0
 #endif
-static Rect dirty[DIRTY], clip;
-static unsigned dirty_count;
-static uint16_t pixels[480 * BAND], rotated[480 * BAND];
+DISPLAY_RENDER_STORAGE(render_storage, 480 * MUSIC_BOX_BAND, UI_CACHE_BYTES);
+static DisplayRenderer renderer;
+static DisplayCanvas *canvas;
+static void paint_scene(DisplayCanvas *target, void *user);
 static volatile uint16_t rx_in, rx_out;
 static volatile uint8_t rx_bad;
 static volatile uint8_t rx[RX_SIZE];
@@ -112,6 +108,11 @@ static uint8_t input_note = 69;
 static const uint8_t natural_pitches[7] = {0,2,4,5,7,9,11};
 static const char *natural_names[7] = {"C","D","E","F","G","A","B"};
 static uint8_t settings_dirty;
+static uint8_t saved_micro = 255, restore_micro;
+static struct {uint32_t at, mhz; uint8_t motor, note;} upcoming[16];
+static uint8_t upcoming_count, predictive_ready, predicted_mask;
+static uint32_t predictive_epoch, predictive_stamp, predicted_at[6];
+static int32_t clock_offset;
 static uint32_t settings_at;
 #if MUSIC_BOX_CONTROLLER
 static unsigned controller_source;
@@ -120,10 +121,25 @@ static char saved_titles[SAVED_SONG_COUNT][32];
 static char playback_error[128];
 static uint8_t initial_render_done;
 static uint32_t saved_durations[SAVED_SONG_COUNT],saved_offset;
-static uint8_t saved_present[SAVED_SONG_COUNT],saved_selected,saved_playing,save_stage,save_percent;
+static uint8_t saved_present[SAVED_SONG_COUNT],saved_selected,saved_playing,saved_loading,save_stage,save_percent;
 static uint8_t pc_range[2]={255,255},saved_range[2]={255,255};
 static unsigned pc_song_visible(void) {return (flags&16)&&duration&&!saved_playing;}
+static unsigned overview_live_midi(void) {
+  return (connection_status & 4) && !pc_song_visible() && !saved_playing;
+}
 #endif
+static DisplayRenderStyle render_style(void) {
+  DisplayRenderStyle style = {DRAW_TOP_TO_BOTTOM,{0,0,0,0},0,0};
+#if MUSIC_BOX_PIXEL_MIDI
+  if(page == 1 && !numeric) {
+    style.direction = DRAW_LEFT_TO_RIGHT;
+    style.cache_area = (DisplayRect){0,54,480,210};
+    style.palette = midi_palette;
+    style.palette_count = sizeof(midi_palette)/sizeof(midi_palette[0]);
+  }
+#endif
+  return style;
+}
 const DisplayModule display_module = {DISPLAY_API_VERSION, 0, 0, 0, 0};
 
 static uint32_t get32(const uint8_t *b) {
@@ -149,58 +165,11 @@ static int inside(int x, int y, int a, int b, int w, int h) {
   return x >= a && y >= b && x < a + w && y < b + h;
 }
 static void invalidate(int x, int y, int w, int h) {
-  unsigned i;
-  if (x < 0) {
-    w += x;
-    x = 0;
-  }
-  if (y < 0) {
-    h += y;
-    y = 0;
-  }
-  if (x + w > 480)
-    w = 480 - x;
-  if (y + h > 320)
-    h = 320 - y;
-  if (w <= 0 || h <= 0)
-    return;
-  for (i = 0; i < dirty_count; i++) {
-    Rect *r = &dirty[i];
-    if (x >= r->x && y >= r->y && x + w <= r->x + r->w && y + h <= r->y + r->h)
-      return;
-    // Merge waiting updates without rewinding the strip currently being painted.
-    if (i && x < r->x + r->w && x + w > r->x && y < r->y + r->h && y + h > r->y) {
-      int x0 = x < r->x ? x : r->x, y0 = y < r->y ? y : r->y;
-      int x1 = x + w > r->x + r->w ? x + w : r->x + r->w;
-      int y1 = y + h > r->y + r->h ? y + h : r->y + r->h;
-      *r = (Rect){x0,y0,x1-x0,y1-y0};
-      return;
-    }
-  }
-  if (dirty_count == DIRTY) {
-    dirty_count = 1;
-    dirty[0] = (Rect){0, 0, 480, 320};
-    return;
-  }
-  dirty[dirty_count++] = (Rect){(int16_t)x, (int16_t)y, (int16_t)w, (int16_t)h};
+  display_renderer_invalidate(&renderer,x,y,w,h);
 }
-static void full(void) {
-  dirty_count = 0;
-  invalidate(0, 0, 480, 320);
-}
+static void full(void) { display_renderer_full(&renderer); }
 static void fill(int x, int y, int w, int h, uint16_t c) {
-  int xx, yy, x1 = x + w, y1 = y + h;
-  if (x < clip.x)
-    x = clip.x;
-  if (y < clip.y)
-    y = clip.y;
-  if (x1 > clip.x + clip.w)
-    x1 = clip.x + clip.w;
-  if (y1 > clip.y + clip.h)
-    y1 = clip.y + clip.h;
-  for (yy = y; yy < y1; yy++)
-    for (xx = x; xx < x1; xx++)
-      pixels[(yy - clip.y) * clip.w + xx - clip.x] = c;
+  display_canvas_fill(canvas,x,y,w,h,c);
 }
 static uint32_t utf8(const char **s) {
   uint32_t c = (uint8_t)*(*s)++;
@@ -232,15 +201,22 @@ static unsigned glyph(uint32_t c) {
 static void text(int x, int y, const char *s, uint16_t color, int scale) {
   int xx, yy;
   unsigned g;
-  if (y >= clip.y + clip.h || y + 16 * scale <= clip.y)
+  if (y >= canvas->clip.y + canvas->clip.h || y + 16 * scale <= canvas->clip.y)
     return;
   while (*s && x < 480) {
     uint32_t code = utf8(&s);
+    if (code == 0x2014 || code == 0x2013) {
+      fill(x + scale, y + 8 * scale, (code == 0x2014 ? 8 : 6) * scale, scale, color);
+      x += 9 * scale;
+      continue;
+    }
     if (code == 0x2022) {
       fill(x + 3 * scale, y + 6 * scale, 3 * scale, 3 * scale, color);
       x += 9 * scale;
       continue;
     }
+    if(x>=canvas->clip.x+canvas->clip.w)return;
+    if(x+9*scale<=canvas->clip.x){x+=9*scale;continue;}
     g = glyph(code);
     for (yy = 0; yy < 16; yy++)
       for (xx = 0; xx < 9; xx++)
@@ -249,13 +225,13 @@ static void text(int x, int y, const char *s, uint16_t color, int scale) {
     x += 9 * scale;
   }
 }
-static void motor_label(int x, int y, const char *s) {
+static void motor_label(int x, int y, const char *s, uint16_t color) {
   while (*s) {
     unsigned g = glyph(utf8(&s));
     for (int yy=0; yy<22; ++yy)
       for (int xx=0; xx<12; ++xx)
         if (font_rows[g][yy*16/22] & (1u << (xx*9/12)))
-          fill(x+xx,y+yy,1,1,BLUE);
+          fill(x+xx,y+yy,1,1,color);
     x+=12;
   }
 }
@@ -267,20 +243,21 @@ static int textlen(const char *s) {
   }
   return n;
 }
+static void paint_boot_error(DisplayCanvas *target, void *user) {
+  const char *first = "Ожидание связи со STM32";
+  const char *second = "Подключение повторяется автоматически";
+  (void)user;
+  canvas = target;
+  fill(0,0,480,320,BG);
+  text((480 - textlen(first) * 9) / 2,136,first,TEXT,1);
+  text((480 - textlen(second) * 9) / 2,168,second,TEXT,1);
+  canvas = 0;
+}
 void music_box_boot_error(const DisplayPlatform *platform) {
-  /* Reuse the Cyrillic font and strip buffer without initializing the app. */
-  const char *first = "Ошибка внутреннего обмена.";
-  const char *second = "Попробуйте перезапустить плату";
   p = platform;
-  dirty_count = 0;
-  for (int y = 0; y < 320; y += BAND) {
-    int height = y + BAND > 320 ? 320 - y : BAND;
-    clip = (Rect){0, (int16_t)y, 480, (int16_t)height};
-    fill(0, y, 480, height, BG);
-    text((480 - textlen(first) * 9) / 2, 136, first, TEXT, 1);
-    text((480 - textlen(second) * 9) / 2, 168, second, TEXT, 1);
-    p->write_rect(0, (uint16_t)y, 480, (uint16_t)height, pixels, 480, 0);
-  }
+  display_renderer_init(&renderer,p,480,320,render_storage,UI_CACHE_BYTES);
+  full();
+  while(display_renderer_step(&renderer,paint_boot_error,0,0)){}
 }
 static void button(int x, int y, int w, int h, const char *s, uint16_t c) {
   fill(x, y, w, h, c);
@@ -311,7 +288,7 @@ static uint32_t note_frequency(unsigned note) {
 static unsigned motor_note(const Motor *m) {
   unsigned best = 16;
   uint32_t distance = UINT32_MAX;
-  for (unsigned n = 16; n <= 107; ++n) {
+  for (unsigned n = 16; n <= 86; ++n) {
     uint32_t f = note_frequency(n);
     uint32_t d = f > m->mhz ? f - m->mhz : m->mhz - f;
     if (d < distance) { best = n; distance = d; }
@@ -325,7 +302,7 @@ static int bar_height(const Motor *m) {
 #if MUSIC_BOX_CONTROLLER
   if (save_stage == 5 || saved_playing || ((flags & 32) && pc_song_visible())) {
     /* Same test chord as STM32 engine_boot_test, limited to installed motors. */
-    static const uint8_t test_notes[6] = {48,52,55,60,64,67};
+    static const uint8_t test_notes[6] = {36,55,64,69,74,79};
     uint8_t test_range[2] = {127,0};
     for (unsigned i=0; i<6; ++i) if (mask & (1u<<i)) {
       if (test_notes[i]<test_range[0]) test_range[0]=test_notes[i];
@@ -355,8 +332,8 @@ static int bar_height(const Motor *m) {
 }
 static void motor_icon(int x, int y, int size, uint16_t c) {
   int k, dx, dy, r = size * 30 / 100, center = size / 2;
-  if (x >= clip.x + clip.w || x + size <= clip.x || y >= clip.y + clip.h ||
-      y + size <= clip.y)
+  if (x >= canvas->clip.x + canvas->clip.w || x + size <= canvas->clip.x || y >= canvas->clip.y + canvas->clip.h ||
+      y + size <= canvas->clip.y)
     return;
   fill(x + 4, y, size - 8, 2, c);
   fill(x + 4, y + size - 2, size - 8, 2, c);
@@ -410,6 +387,9 @@ static void midi_clock_update(uint32_t at, int running) {
   if (midi_source_valid) {
     int32_t delta=(int32_t)(at-midi_source_time);
     if (delta<0) {
+      /* Replies can carry an older clock. Small transport delays are not a
+         new song/session and must never wipe the piano roll. */
+      if(delta>=-1000)return;
       memset(notes,0,sizeof(notes));note_next=0;midi_dirty=1;midi_tail_ms=0;
     } else if (running && delta) { midi_now+=(uint32_t)delta;midi_dirty=1; }
     else if (delta && midi_tail_ms) {
@@ -491,8 +471,16 @@ static void draw_overview(void) {
     fill(x + 74, 150, 1, 48, MUTED);
     motor_icon(x + 6, 156, 36, visible_note ? BLUE : MOTOR_OFF);
     snprintf(s, sizeof(s), MUSIC_BOX_LIVE ? "V%u" : "M%u", i + 1);
-    motor_label(x + 46, 163, s);
+    motor_label(x + 46, 163, s, visible_note ? BLUE : MOTOR_OFF);
   }
+#if MUSIC_BOX_CONTROLLER
+  if (overview_live_midi()) {
+    fill(8, 206, 464, 50, PANEL);
+    text(16, 211, "Подключено:", MUTED, 1);
+    text(16, 233, midi_device_name, TEXT, 1);
+    return;
+  }
+#endif
   fill(8, 206, 340, 50, PANEL);
 #if MUSIC_BOX_CONTROLLER
   text(16, 211, pc_song_visible()?title:saved_present[saved_selected]?saved_titles[saved_selected]:"Выберите мелодию", TEXT, 1);
@@ -509,7 +497,11 @@ static void draw_overview(void) {
   time_text(b, duration);
 #endif
   snprintf(s, sizeof(s), "%s / %s", a, b);
+#if MUSIC_BOX_CONTROLLER
+  text(16, 229, saved_loading ? "Загрузка мелодии..." : s, saved_loading ? BLUE : MUTED, 1);
+#else
   text(16, 229, s, MUTED, 1);
+#endif
   fill(16, 249, 324, 3, BTN);
   if (duration)
     fill(16, 249, (int)((uint64_t)324 * position / duration), 3, BLUE);
@@ -572,7 +564,7 @@ static void draw_song(void) {
   text(76,82,saved_present[saved_selected]?saved_titles[saved_selected]:"Пустое место",TEXT,1);
   time_text(time,saved_durations[saved_selected]);text(76,112,time,MUTED,1);
   text(16,155,"Сохранить через MotorMusic Studio",MUTED,1);
-  text(16,214,"Запуск: Обзор - Пуск",MUTED,1);
+  text(16,214,saved_loading?"Загрузка мелодии...":"Запуск: Обзор - Пуск",saved_loading?BLUE:MUTED,1);
 #else
 #if MUSIC_BOX_LIVE
   text(16, 40, "ЖИВОЙ USB-MIDI", BLUE, 1);
@@ -649,7 +641,8 @@ static void draw_midi(void) {
   uint32_t start = midi_now > 8000 ? midi_now - 8000 : 0;
   int x, y, w;
   const int left = 48, top = 86, height = 168;
-  text(8, 34, (flags & 8) ? "MIDI подключён" : "Нет подключения", MUTED, 1);
+  char device_label[64];snprintf(device_label,sizeof(device_label),"MIDI: %s",midi_device_name);
+  text(8, 34, (flags & 8) ? device_label : "Нет подключения", MUTED, 1);
   for (i = 0; i < 6; i++) {
     snprintf(s, sizeof(s), MUSIC_BOX_LIVE ? "V%u" : "M%u", i + 1);
     text(12 + (int)i * 78, 56, s, voice_colors[i], 1);
@@ -660,7 +653,6 @@ static void draw_midi(void) {
     text(i == 4 ? 436 : left + (int)i * 100, 70, s, MUTED, 1);
     fill(left + (int)i * 100, top, 1, height, BTN);
   }
-  text(1, 70, "Ноты", MUTED, 1);
   text(1, 81, "D6", MUTED, 1);
   text(1, 112, "C5", MUTED, 1);
   text(1, 140, "C4", MUTED, 1);
@@ -705,7 +697,7 @@ static void draw_numeric(void) {
     char label[16];
     unsigned pitch=input_note%12;
     note_text(label,input_note);text(20,106,label,TEXT,2);
-    text(8,165,"Диапазон E0..B7",MUTED,1);
+    text(8,165,"Диапазон E0..D6",MUTED,1);
     for(i=0;i<7;++i) {
       unsigned base=natural_pitches[i];
       int chosen=pitch==base || (base!=4 && base!=11 && pitch==base+1);
@@ -746,11 +738,13 @@ static void scene(void) {
     text(status_right, 6, "USB", GREEN, 1);
     status_right -= 12;
   }
-  if (!(connection_status & 1) || !(connection_status & 6))
+  if (saved_loading)
+    text(status_right - 9 * textlen("Загрузка..."), 6, "Загрузка...", BLUE, 1);
+  else if (!(connection_status & 1) || !(connection_status & 6))
     text(status_right - 9 * textlen(status), 6, status,
          (connection_status & 1) ? MUTED : RED, 1);
 #else
-  const char *status = MUSIC_BOX_LIVE ? ((flags & 8) ? "USB-MIDI" : "Нет USB") :
+  const char *status = MUSIC_BOX_LIVE ? ((flags & 8) ? "MIDI" : "Нет MIDI") :
        ((flags & 1) ? "6 МОТОРОВ" : "Нет связи");
   text(470 - 9 * textlen(status), 6, status,
        (flags & (MUSIC_BOX_LIVE ? 8 : 1)) ? GREEN : MUTED, 1);
@@ -790,7 +784,7 @@ static void scene(void) {
       fill(16,242,448,8,BTN);fill(16,242,448*save_percent/100,8,GREEN);
     } else if(save_stage==7) {
       fill(8,204,464,54,PANEL);
-      text(16,210,"Не удалось запустить",RED,1);
+      text(16,210,"Ошибка воспроизведения",RED,1);
       text(16,234,playback_error,TEXT,1);
     } else {
     fill(20,82,440,152,PANEL);
@@ -805,81 +799,22 @@ static void scene(void) {
     text(8, 33, notice, TEXT, 1);
   }
 }
-static void flush_one(void) {
-  int xx, yy;
-  Rect *r;
-  unsigned h;
-  if (!dirty_count)
-    return;
-  r = &dirty[0];
-#if MUSIC_BOX_PIXEL_MIDI
-  if(page == 1 && !numeric && p->width == 480 && p->height == 320) {
-    if(!midi_image_valid){memset(midi_image,255,sizeof(midi_image));midi_image_valid=1;}
-    // Vertical slices bound CPU/SPI work between touch polls. Scan left to right.
-    int columns=(480*BAND)/r->h;
-    if(columns>32)columns=32;
-    if(columns>r->w)columns=r->w;
-    clip=(Rect){r->x,r->y,(int16_t)columns,r->h};
-    scene();
-    memset(midi_changed,0,(columns*r->h+7)/8);
-    for(yy=0;yy<r->h;++yy)for(xx=0;xx<columns;++xx) {
-      int y=r->y+yy,changed=1;
-      if(y>=54 && y<264) {
-        unsigned index=(unsigned)(y-54)*480+r->x+xx,shift=(index&1)*4;
-        unsigned code=midi_pixel_code(pixels[yy*columns+xx]);
-        unsigned old=(midi_image[index/2]>>shift)&15;
-        changed=code==15 || old!=code;
-        midi_image[index/2]=(uint8_t)((midi_image[index/2]&~(15u<<shift))|(code<<shift));
-      }
-      if(changed)midi_mark(yy*columns+xx);
-    }
-    // Merge adjacent changed runs into rectangles without including a single unchanged pixel.
-    for(xx=0;xx<columns;++xx)for(yy=0;yy<r->h;) {
-      if(!midi_changed_at(yy*columns+xx)){++yy;continue;}
-      int end=yy+1,right=xx+1;
-      while(end<r->h && midi_changed_at(end*columns+xx))++end;
-      while(right<columns) {
-        int row;
-        for(row=yy;row<end && midi_changed_at(row*columns+right);++row){}
-        if(row!=end)break;
-        ++right;
-      }
-      p->write_rect(r->x+xx,r->y+yy,right-xx,end-yy,pixels+yy*columns+xx,columns,0);
-      for(int col=xx;col<right;++col)for(int row=yy;row<end;++row)midi_unmark(row*columns+col);
-      yy=end;
-    }
-    r->x+=(int16_t)columns;r->w-=(int16_t)columns;
-    if(!r->w){--dirty_count;memmove(dirty,dirty+1,dirty_count*sizeof(Rect));}
-    return;
-  }
-  midi_image_valid=0;
-#endif
-  h = (unsigned)r->h;
-  if (h > BAND)
-    h = BAND;
-  clip = (Rect){r->x, r->y, r->w, (int16_t)h};
+static void paint_scene(DisplayCanvas *target, void *user) {
+  (void)user;
+  canvas = target;
   scene();
-  if (p->width == 320 && p->height == 480) {
-    for (yy = 0; yy < (int)h; yy++)
-      for (xx = 0; xx < r->w; xx++)
-        rotated[xx * h + h - 1 - yy] = pixels[yy * r->w + xx];
-    p->write_rect((uint16_t)(320 - r->y - h), (uint16_t)r->x, (uint16_t)h,
-                  (uint16_t)r->w, rotated, (uint16_t)h, 0);
-  } else
-    p->write_rect((uint16_t)r->x, (uint16_t)r->y, (uint16_t)r->w, (uint16_t)h,
-                  pixels, (uint16_t)r->w, 0);
-  r->y += (int16_t)h;
-  r->h -= (int16_t)h;
-  if (!r->h) {
-    dirty_count--;
-    memmove(dirty, dirty + 1, dirty_count * sizeof(Rect));
-  }
+  canvas = 0;
+}
+static void flush_one(void) {
+  DisplayRenderStyle style = render_style();
+  display_renderer_step(&renderer,paint_scene,0,&style);
 }
 static void save_settings(void) {
-  uint8_t b[8] = {'M', 'B', 1, 0, 0, 0, 0, 0};
+  uint8_t b[8] = {'M', 'B', 2, 0, 0, 255, 0, 0};
   uint16_t c;
   b[3] = show_hz;
   b[4] = width_index;
+  b[5] = saved_micro;
   c = crc16(b, 6);
   b[6] = (uint8_t)c;
   b[7] = (uint8_t)(c >> 8);
@@ -915,7 +850,7 @@ static void touch_numeric(int x, int y) {
   }
   if (!show_hz) {
     if (inside(x,y,8,204,170,48)) {
-      if(input_note<16||input_note>107){notification("Диапазон нот: E0..B7");return;}
+      if(input_note<16||input_note>86){notification("Диапазон нот: E0..D6");return;}
       send_action(3,selected,note_frequency(input_note));
       numeric=0;
     } else {
@@ -950,13 +885,13 @@ static void touch_numeric(int x, int y) {
         mult /= 10;
       }
     }
-    if (hz > 4000) {
-      notification("Частота: 20..4000 Гц");
+    if (hz > 1200) {
+      notification("Частота: 20..1200 Гц");
       return;
     }
     hz = hz * 1000 + frac;
-    if (*s || hz < 20000 || hz > 4000000) {
-      notification("Частота: 20..4000 Гц");
+    if (*s || hz < 20000 || hz > 1200000) {
+      notification("Частота: 20..1200 Гц");
       return;
     }
     send_action(3, selected, hz);
@@ -1031,8 +966,8 @@ static void tap(int x, int y) {
       }
     }
 #if MUSIC_BOX_CONTROLLER
-    else if((pc_song_visible()||saved_playing)&&inside(x,y,8,206,340,50))seek(x);
-    else if(inside(x,y,356,206,116,50)) {
+    else if(!overview_live_midi()&&(pc_song_visible()||saved_playing)&&inside(x,y,8,206,340,50))seek(x);
+    else if(!overview_live_midi()&&inside(x,y,356,206,116,50)) {
       if(pc_song_visible())send_action(1,0,0);
       else if(saved_present[saved_selected])send_action(20,saved_selected,0);
       else notification("Выберите мелодию во вкладке Мелодия");
@@ -1056,8 +991,8 @@ static void tap(int x, int y) {
       send_action(3, selected, show_hz ? (m->mhz >= 30000 ? m->mhz - 10000 : 20000) :
                   note_frequency(motor_note(m) > 16 ? motor_note(m) - 1 : 16));
     else if (inside(x, y, 422, 90, 50, 48))
-      send_action(3, selected, show_hz ? (m->mhz <= 3990000 ? m->mhz + 10000 : 4000000) :
-                  note_frequency(motor_note(m) < 107 ? motor_note(m) + 1 : 107));
+      send_action(3, selected, show_hz ? (m->mhz <= 1190000 ? m->mhz + 10000 : 1200000) :
+                  note_frequency(motor_note(m) < 86 ? motor_note(m) + 1 : 86));
     else if (inside(x, y, 8, 202, 160, 48))
       send_action(4, selected, !(m->flags & 1));
     else if (inside(x, y, 176, 146, 296, 48))
@@ -1129,33 +1064,11 @@ static void update_overview(const uint8_t *previous_heights) {
     int active = !!(motors[i].flags & 2) || ((flags & 64) && (motors[i].flags & 8));
     int clear = !have_state || !(flags & 1) || sleeping || resetting ||
                 !(mask & (1u << i)) || (flags & 4);
-    if (!(flags & (32 | 64))) { /* File/queued playback; live and manual stay immediate. */
-      overview[i] = motors[i];
-      overview[i].flags &= 7;
-      if ((flags & 64) && (motors[i].flags & 8)) overview[i].flags |= 2;
-      if (clear) overview[i].flags = 0;
-      overview_was_active[i] = 0;
-    } else if (clear) {
-      overview[i] = motors[i];
-      overview[i].flags = 0;
-      overview_was_active[i] = 0;
-    } else if (active) {
-      if (!overview_was_active[i] || overview[i].note != motors[i].note)
-        overview_started[i] = now;
-      overview[i] = motors[i];
-      overview[i].flags = (overview[i].flags & 7) | 2; /* Actual note or confirmed queue hold. */
-      overview_was_active[i] = 1;
-    } else {
-      if (overview_was_active[i]) {
-        overview_off[i] = now;
-        if ((int32_t)(now - overview_started[i]) < (int32_t)OVERVIEW_MIN_MS)
-          overview_off[i] = overview_started[i] + OVERVIEW_MIN_MS;
-      }
-      overview_was_active[i] = 0;
-      if ((int32_t)(now - overview_started[i]) >= (int32_t)OVERVIEW_MIN_MS &&
-          (int32_t)(now - overview_off[i]) >= (int32_t)OVERVIEW_GAP_MS)
-        overview[i].flags &= (uint8_t)~2u;
-    }
+    /* No note timers on ESP. STATE v2 includes the final presentation. */
+    overview[i] = controller_overview_ready ? controller_overview[i] : motors[i];
+    if (!controller_overview_ready)
+      overview[i].flags = (overview[i].flags & 5) | (active ? 2 : 0);
+    if (clear) overview[i].flags = 0;
     if (page == 0) {
       int a = previous_heights ? previous_heights[i] : bar_height(&old);
       int v = bar_height(&overview[i]);
@@ -1172,11 +1085,41 @@ static void update_overview(const uint8_t *previous_heights) {
   }
 }
 
+static void apply_upcoming(void) {
+  if(!predictive_ready || !have_state || !(flags&64) || sleeping || resetting || (flags&4))return;
+  uint32_t stm_now=now-(uint32_t)clock_offset;
+  unsigned used=0;
+  while(used<upcoming_count && (int32_t)(stm_now-upcoming[used].at)>=0) {
+    unsigned m=upcoming[used].motor;
+    // A newer authoritative STATE may already have released this note while
+    // the UI was busy. Never resurrect its expired prediction afterwards.
+    if((int32_t)(upcoming[used].at-predictive_stamp)>=0 &&
+       (mask&(1u<<m)) && (!(predicted_mask&(1u<<m)) || (int32_t)(upcoming[used].at-predicted_at[m])>0)) {
+      controller_overview[m].note=upcoming[used].note;
+      controller_overview[m].mhz=upcoming[used].mhz;
+      controller_overview[m].flags=(controller_overview[m].flags&4)|3;
+      predicted_at[m]=upcoming[used].at;predicted_mask|=1u<<m;
+    }
+    ++used;
+  }
+  if(used) {
+    upcoming_count-=used;memmove(upcoming,upcoming+used,upcoming_count*sizeof(upcoming[0]));
+    update_overview(NULL);
+  }
+}
 static void process_packet(void) {
   uint8_t *b = packet + 5;
   unsigned len = packet[2], i;
   uint8_t old_flags = flags;
-  if (packet[4] == 0x40 && len == 50 && b[0] == 1) {
+  if (packet[4] == 0x40 && ((len == 50 && b[0] == 1) || (len == 86 && b[0] == 2) || (len == 94 && b[0] == 3))) {
+    if(b[0]==3 && (b[1]&64) && !(b[1]&4) && !b[2] && !b[3]) {
+      uint32_t stamp=get32(b+86), epoch=get32(b+90);
+      int32_t offset=(int32_t)(now-stamp);
+      if(!predictive_ready || epoch!=predictive_epoch) {
+        upcoming_count=predicted_mask=0;clock_offset=offset;
+      } else if(offset<clock_offset)clock_offset=offset;
+      predictive_ready=1;predictive_epoch=epoch;predictive_stamp=stamp;
+    } else {predictive_ready=upcoming_count=predicted_mask=0;}
     uint32_t oldpos = position, oldduration = duration;
     uint8_t oldsleep = sleeping, oldreset = resetting, oldmicro = micro;
     uint8_t previous_heights[6];
@@ -1188,6 +1131,12 @@ static void process_packet(void) {
     sleeping = b[2];
     resetting = b[3];
     micro = b[4];
+    /* Do not replace Flash settings with the STM's power-on default.
+       A connected PC remains authoritative for its explicit settings. */
+    if (restore_micro && (micro == saved_micro || (flags & 16))) restore_micro = 0;
+    if (!restore_micro && saved_micro != micro) {
+      saved_micro = micro; settings_dirty = 1; settings_at = now;
+    }
     mask = b[5] & 63;
     position = get32(b + 6);
     duration = get32(b + 10);
@@ -1201,10 +1150,19 @@ static void process_packet(void) {
       motors[i].flags = b[14 + i * 6] & 15;
       motors[i].note = b[15 + i * 6];
       motors[i].mhz = get32(b + 16 + i * 6);
-      if (motors[i].mhz > 4000000)
-        motors[i].mhz = 4000000;
+      if (motors[i].mhz > 1200000)
+        motors[i].mhz = 1200000;
       if (!(flags & 1) || !(mask & (1 << i)))
         motors[i].flags = 0;
+    }
+    controller_overview_ready = b[0] >= 2;
+    if (controller_overview_ready) for (i = 0; i < 6; i++) {
+      /* A delayed actual snapshot must not undo an already scheduled onset. */
+      if(predictive_ready && (predicted_mask&(1u<<i)) &&
+         (int32_t)(predictive_stamp-predicted_at[i])<0)continue;
+      controller_overview[i].flags = b[50+i*6] & 7;
+      controller_overview[i].note = b[51+i*6];
+      controller_overview[i].mhz = get32(b+52+i*6);
     }
     last_state = now;
     have_state = 1;
@@ -1234,6 +1192,18 @@ static void process_packet(void) {
       invalidate(0, 84, 480, 180);
     else if (page == 1 && old_flags != flags)
       invalidate(0, 28, 480, 26);
+  } else if (packet[4] == 0x45 && predictive_ready && len>=5 && len<=165 &&
+             get32(b)==predictive_epoch && b[4]<=16 && len==5+10u*b[4]) {
+    for(i=0;i<b[4];++i) {
+      const uint8_t *e=b+5+10*i;int32_t ahead=(int32_t)(get32(e)-predictive_stamp);
+      if(e[4]>=6 || e[5]>=128 || get32(e+6)<20000 || get32(e+6)>1200000 || ahead<0 || ahead>100 ||
+         (i && (int32_t)(get32(e)-get32(e-10))<0))return;
+    }
+    upcoming_count=b[4];
+    for(i=0;i<upcoming_count;++i) {
+      const uint8_t *e=b+5+10*i;
+      upcoming[i].at=get32(e);upcoming[i].motor=e[4];upcoming[i].note=e[5];upcoming[i].mhz=get32(e+6);
+    }
   } else if (packet[4] == 0x44 && len == 2) {
 #if MUSIC_BOX_CONTROLLER
     if (pc_range[0] != b[0] || pc_range[1] != b[1]) {
@@ -1241,6 +1211,10 @@ static void process_packet(void) {
       if (page == 0) full();
     }
 #endif
+  } else if (packet[4] == 0x46 && len <= 48) {
+    if(strlen(midi_device_name)!=len||memcmp(midi_device_name,b,len)) {
+      memcpy(midi_device_name,b,len);midi_device_name[len]=0;full();
+    }
   } else if (packet[4] == 0x41 && len <= 48) {
     if (strlen(title) != len || memcmp(title, b, len)) {
       memcpy(title, b, len);
@@ -1255,18 +1229,24 @@ static void process_packet(void) {
       if(flags&(2|64))return; /* Ignore already queued Note On after STOP ALL. */
       midi_stop_latched=0; /* A newly started motor after the stopped state. */
     }
-    midi_clock_update(get32(b),midi_timeline_running()||!!b[6]);
-    uint32_t at = midi_now;
+    uint32_t stamp=get32(b),at;
+    if(midi_source_valid&&(int32_t)(stamp-midi_source_time)<0) {
+      uint32_t late=midi_source_time-stamp;
+      if(late>8000)return; /* Outside the visible history. Events never reset it. */
+      at=late>midi_now?0:midi_now-late;
+    } else {
+      midi_clock_update(stamp,midi_timeline_running()||!!b[6]);at=midi_now;
+    }
     midi_dirty = 1;
     for (i = 0; i < NOTES; i++)
       if (notes[i].used && notes[i].open && notes[i].motor == b[4] &&
           (b[6] || notes[i].pitch == b[5])) {
-        notes[i].end = at;
+        notes[i].end = at<notes[i].start?notes[i].start:at;
         notes[i].open = 0;
       }
     if (b[6]) {
-      MidiNote *n = &notes[note_next++ % NOTES];
-      *n = (MidiNote){at, at, b[4], b[5], 1, 1};
+      MidiNote *n = midi_note_slot(at);
+      if(n)*n = (MidiNote){at, at, b[4], b[5], 1, 1};
     }
   } else if (packet[4] == 0x43 && len == 4) {
     midi_clock_update(get32(b),midi_timeline_running());
@@ -1330,10 +1310,7 @@ void display_init(const DisplayPlatform *platform) {
   rx_in = rx_out = 0;
   rx_bad = 0;
   packet_n = 0;
-  dirty_count = 0;
-#if MUSIC_BOX_PIXEL_MIDI
-  midi_image_valid = 0;
-#endif
+  display_renderer_init(&renderer,p,480,320,render_storage,UI_CACHE_BYTES);
   note_next = 0;
   midi_now = 0;
   midi_source_valid=midi_stop_latched=midi_input_running=0;
@@ -1341,12 +1318,13 @@ void display_init(const DisplayPlatform *platform) {
   midi_dirty = 0;
   notice_until = 0;
   settings_dirty = 0;
+  saved_micro = 255; restore_micro = 0;
+  predictive_ready=upcoming_count=predicted_mask=0;
   last_paint = last_midi_draw = now;
   memset(notes, 0, sizeof(notes));
   memset(overview, 0, sizeof(overview));
-  memset(overview_was_active, 0, sizeof(overview_was_active));
-  memset(overview_started, 0, sizeof(overview_started));
-  memset(overview_off, 0, sizeof(overview_off));
+  memset(controller_overview, 0, sizeof(controller_overview));
+  controller_overview_ready = 0;
   strcpy(title, MUSIC_BOX_LIVE ? "Живой USB-MIDI" : "Нет композиции");
   for (i = 0; i < 6; i++) {
     motors[i].flags = 0;
@@ -1354,10 +1332,13 @@ void display_init(const DisplayPlatform *platform) {
     motors[i].mhz = 440000;
   }
   if (p->flash_read && p->flash_read(SETTINGS_ADDR, b, 8) && b[0] == 'M' &&
-      b[1] == 'B' && b[2] == 1 && b[3] < 2 && b[4] < 3 &&
+      b[1] == 'B' && (b[2] == 1 || b[2] == 2) && b[3] < 2 && b[4] < 3 &&
       crc16(b, 6) == (uint16_t)(b[6] | b[7] << 8)) {
     show_hz = b[3];
     width_index = b[4];
+    if (b[2] == 2 && (b[5] <= 3 || b[5] == 7)) {
+      saved_micro = b[5]; restore_micro = 1;
+    }
   }
   if (p->version == DISPLAY_API_VERSION && p->write_rect &&
       ((p->width == 320 && p->height == 480) ||
@@ -1416,6 +1397,7 @@ void display_event(const DisplayEvent *e) {
 void display_step(uint32_t ms) {
   unsigned budget = 512;
   now = ms;
+  apply_upcoming();
   if (rx_bad) {
     rx_out = rx_in;
     packet_n = 0;
@@ -1430,6 +1412,9 @@ void display_step(uint32_t ms) {
     rx_time = now;
     consume(b);
   }
+  apply_upcoming();
+  if (restore_micro && have_state && (flags & 1) && !(flags & (2|16|64)) && !pending)
+    send_action(7, 0, saved_micro);
   if (have_state && (int32_t)(now - last_state) > 1500) {
     unsigned i;
     flags = 0;
@@ -1457,19 +1442,19 @@ void display_step(uint32_t ms) {
     invalidate(0, 28, 480, 26);
   }
   if (page == 1 && midi_dirty && now - last_midi_draw >= MUSIC_BOX_MIDI_INTERVAL_MS &&
-      (!(MUSIC_BOX_LIVE || MUSIC_BOX_CONTROLLER) || !dirty_count)) {
+      (!(MUSIC_BOX_LIVE || MUSIC_BOX_CONTROLLER) || !display_renderer_pending(&renderer))) {
     midi_dirty = 0;
     last_midi_draw = now;
     invalidate(0, 54, 480, 210);
   }
-  if (settings_dirty && !touch_down && !(flags & 2) && !dirty_count &&
+  if (settings_dirty && !touch_down && !(flags & 2) && !display_renderer_pending(&renderer) &&
       (!(MUSIC_BOX_LIVE || MUSIC_BOX_CONTROLLER) || !pending) &&
       now - settings_at >= 5000)
     save_settings();
   if (p && p->write_rect) {
     flush_one();
 #if MUSIC_BOX_CONTROLLER
-    if(!dirty_count)initial_render_done=1;
+    if(!display_renderer_pending(&renderer))initial_render_done=1;
 #endif
   }
   last_paint = now;
@@ -1523,17 +1508,18 @@ void music_box_control_frame(const uint8_t *frame, unsigned length) {
   process_packet();
 }
 void music_box_control_source(unsigned source) {
+  predictive_ready=upcoming_count=predicted_mask=0;
   if (controller_source == source) return;
   controller_source = source;
   // Never carry a pending command, notes or playback position to another controller.
   pending = packet_n = 0; have_state = flags = 0;
   memset(overview, 0, sizeof(overview));
-  memset(overview_was_active, 0, sizeof(overview_was_active));
+  controller_overview_ready = 0;
   memset(notes, 0, sizeof(notes)); note_next = 0; midi_now = 0;
   midi_source_valid=0;midi_tail_ms=0;
   for (unsigned i = 0; i < 6; ++i) motors[i].flags = 0;
   position = duration = 0;
-    strcpy(title, source == 1 ? "Контроллер UART" : source == 2 ? "USB-симулятор" : source == 3 ? "USB MIDI: выход ESP" : "Нет контроллера");
+    strcpy(title, source == 1 ? "Контроллер UART" : (source == 2 || source == 3) ? "MIDI" : "Нет контроллера");
   full();
 }
 void music_box_control_connections(unsigned status) {
@@ -1561,12 +1547,25 @@ void music_box_save_progress(unsigned stage,unsigned percent) {
   if((old_stage==0||old_stage==5)&&(stage==0||stage==5))invalidate(8,204,464,54);
   else full();
 }
-unsigned music_box_screen_ready(void) {return initial_render_done;}
+unsigned music_box_screen_ready(void) {
+  return initial_render_done && !restore_micro && !(pending && action_packet[5] == 7);
+}
 void music_box_playback_error(const char *reason) {
   strncpy(playback_error,reason,sizeof(playback_error)-1);playback_error[sizeof(playback_error)-1]=0;
   save_stage=7;full();
 }
 void music_box_saved_offset(uint32_t offset){saved_offset=offset;position=offset;full();}
 void music_box_saved_range(uint8_t low,uint8_t high){saved_range[0]=low;saved_range[1]=high;full();}
-void music_box_saved_playing(unsigned playing) {saved_playing=!!playing;full();}
+void music_box_saved_loading(unsigned loading) {
+  loading=!!loading;
+  if(saved_loading==loading)return;
+  saved_loading=loading;
+  invalidate(140,0,340,28);
+  if(page==0||page==2)invalidate(8,206,340,50);
+}
+void music_box_saved_playing(unsigned playing) {
+  saved_playing=!!playing;
+  if(!playing)saved_loading=0;
+  full();
+}
 #endif

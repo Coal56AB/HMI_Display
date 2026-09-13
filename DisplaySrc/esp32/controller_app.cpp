@@ -1,15 +1,22 @@
 #include "hmi_board.h"
+#include "hmi_module.h"
 #include "controller_link.h"
 #include "music_box_control.h"
+#include "ui_bridge.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "midi_board_config.h"
 #include "midi_app.h"
 #include "song_store.h"
 #include "esp_link.h"
 #include "startup_link.h"
+#include "usb_role.h"
+#include "esp_private/usb_phy.h"
 #include "driver/usb_serial_jtag.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include <cstring>
+#include <atomic>
 
 namespace {
 // Separate bounded TX queues preserve partially sent packets on either transport.
@@ -35,80 +42,71 @@ struct Output {
 } outputs[2];
 uint32_t last_heartbeat;
 uint32_t last_diagnostics;
+uint32_t last_link_report;
 bool heartbeat_due = true;
-bool usb_device;
+std::atomic<bool> usb_device{false};
+usb_phy_handle_t serial_phy=nullptr;
+UsbRole usb_role;
 bool midi_connected;
 bool pc_control_active;
-uint32_t boot_pressed;
-uint8_t midi_notes[6] = {255,255,255,255,255,255};
-uint32_t midi_clock;
+struct UiCommand {bool diagnostic;unsigned length;uint8_t bytes[48];};
+QueueHandle_t ui_commands;
+TaskHandle_t controller_task;
 void send(control::Source source, const uint8_t *bytes, unsigned count) {
-    // Stop/pause must gate the MIDI producer, otherwise its next heartbeat restarts notes.
-    if (control::routes_to_midi(source,bytes[5],usb_device,pc_control_active)) {
-        midi_app_send(bytes, count);
-        // Global stop also reaches STM32 when the PC currently owns motors.
-        if(source!=control::Uart || bytes[5]!=0)return;
+    if(source==control::Uart && count>=8 && bytes[4]==0x56) {
+        esp_link_send(bytes,count);return; // Bounded queue; PC retries if full.
     }
-    if (source == control::Uart || source == control::Usb) outputs[source - 1].add(bytes, count);
+    if (source == control::Uart || (source == control::Usb && usb_device)) outputs[source - 1].add(bytes, count);
 }
 void changed(control::Source source) {
     for (auto &out : outputs) out.discard_unsent();
     heartbeat_due = true;
-    music_box_control_source(unsigned(source));
+    ui_bridge::music_box_control_source(unsigned(source));
+    if(usb_device) {
+        ui_bridge::music_box_midi_name("USB-симулятор");
+    }
 }
-control::Link link(music_box_control_frame, changed, send);
-void midi_frame(uint8_t cmd, const uint8_t *payload, unsigned size, uint32_t now) {
-    uint8_t bytes[64];
-    const auto n = control::encode(bytes, cmd, payload, size);
-    for (unsigned i=0;i<n;++i) link.feed(control::Midi, bytes[i], now);
-}
+control::Link controller_link(ui_bridge::music_box_control_frame, changed, send);
 void put32(uint8_t *p, uint32_t n) { for(unsigned i=0;i<4;++i)p[i]=uint8_t(n>>(8*i)); }
+void serial_start() {
+    usb_phy_config_t phy{};phy.controller=USB_PHY_CTRL_SERIAL_JTAG;phy.target=USB_PHY_TARGET_INT;
+    ESP_ERROR_CHECK(usb_new_phy(&phy,&serial_phy));
+    usb_serial_jtag_driver_config_t usb{};usb.tx_buffer_size=512;usb.rx_buffer_size=4096;
+    ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usb));
+    usb_device=true;
 }
-void app_midi_snapshot(const live::Snapshot &s, bool reset_history) {
-    midi_connected = s.connected;
-    music_box_midi_input(s.connected && s.enabled);
-    const uint32_t now = hmi_platform.now_ms();
-    uint8_t p[50]{};
-    if (reset_history) {
-        put32(p,midi_clock-1);midi_frame(0x43,p,4,now);
-        memset(midi_notes,255,sizeof(midi_notes));
-    }
-    put32(p,s.at);midi_frame(0x43,p,4,now);
-    midi_clock=s.at;
-    for(unsigned i=0;i<6;++i) {
-        if(midi_notes[i]==s.notes[i])continue;
-        p[4]=uint8_t(i);
-        if(midi_notes[i]<128){p[5]=midi_notes[i];p[6]=0;midi_frame(0x42,p,7,now);}
-        if(s.notes[i]<128){p[5]=s.notes[i];p[6]=100;midi_frame(0x42,p,7,now);}
-        midi_notes[i]=s.notes[i];
-    }
-    memset(p,0,sizeof(p));p[0]=1;p[1]=s.connected?9:0;p[5]=63;
-    if(!s.enabled)p[1]|=4;
-    for(unsigned i=0;i<6;++i) {
-        const bool active=s.notes[i]<128;
-        p[14+i*6]=active?3:0;p[15+i*6]=s.notes[i];
-        put32(p+16+i*6,live::frequency_mhz(s.notes[i]));
-        if(active)p[1]|=2;
-    }
-    midi_frame(0x40,p,50,now);
+void serial_stop() {
+    usb_device=false;
+    ESP_ERROR_CHECK(usb_serial_jtag_driver_uninstall());
+    ESP_ERROR_CHECK(usb_del_phy(serial_phy));serial_phy=nullptr;
+    outputs[1]=Output{};
 }
-void app_midi_ack(uint8_t sequence, uint8_t result) {
-    uint8_t bytes[8];control::encode(bytes,0x51,&result,1,sequence);
-    music_box_control_frame(bytes,sizeof(bytes));
+void update_usb_role(uint32_t now) {
+    const bool peer=usb_device?usb_serial_jtag_is_connected():midi_app_connected();
+    switch(usb_role.tick(now,peer,midi_app_stopped())) {
+    case UsbRole::StartHost:
+        serial_stop();controller_link.disconnect(control::Usb,now);
+        ui_bridge::music_box_midi_name("USB MIDI");
+        midi_app_start();ESP_LOGI("hmi","USB: probing MIDI host");break;
+    case UsbRole::StopHost:
+        midi_app_stop();break;
+    case UsbRole::StartSerial:
+        serial_start();ui_bridge::music_box_midi_name("USB-симулятор");
+        ESP_LOGI("hmi","USB: probing PC");break;
+    default:break;
+    }
+}
 }
 bool hmi_module_start() {
     hmi_boot_status("UART LINK",55);
     esp_link_start();
-    usb_serial_jtag_driver_config_t usb{};
-    usb.tx_buffer_size = 512; usb.rx_buffer_size = 4096;
-    ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usb));
+    serial_start();
     // ROM USB serial/JTAG sees host SOF even when no terminal has opened the port.
     // Allow enumeration after reset, then give the one internal PHY to the chosen role.
-    usb_device = false;
+    bool initial_pc = false;
     hmi_boot_status("USB DETECT",65);
-    for(unsigned i=0;i<100;++i) {
-        if(usb_serial_jtag_is_connected())usb_device=true;
-        if(i%20==0)hmi_boot_status("USB DETECT",65+i/5);
+    for(unsigned i=0;i<10;++i) {
+        if(usb_serial_jtag_is_connected()){initial_pc=true;break;}
         vTaskDelay(pdMS_TO_TICKS(10));
     }
     hmi_boot_status("UART LINK",85);
@@ -116,12 +114,21 @@ bool hmi_module_start() {
     uint8_t stale[256];
     while (esp_link_read(stale, sizeof(stale)) > 0) {}
     StartupLink startup(hmi_platform.now_ms());
-    while (startup.state(hmi_platform.now_ms()) == StartupLink::State::Waiting) {
+    bool waiting_message = false;
+    while (startup.state(hmi_platform.now_ms()) != StartupLink::State::Ready) {
         const uint32_t now = hmi_platform.now_ms();
+        if (startup.state(now) == StartupLink::State::Failed) {
+            if (usb_serial_jtag_is_connected()) {initial_pc=true;break;}
+            if (!waiting_message) {
+                music_box_boot_error(&hmi_platform);
+                ESP_LOGW("hmi", "Waiting for STM32; UART probes continue");
+                waiting_message = true;
+            }
+        }
         uint8_t bytes[256];
         const int count = esp_link_read(bytes, sizeof(bytes));
         for (int i = 0; i < count; ++i) startup.feed(bytes[i], now);
-        if (startup.state(now) != StartupLink::State::Waiting) break;
+        if (startup.state(now) == StartupLink::State::Ready) break;
         if (startup.probe_due(now)) {
             // Register the screen link, but do not request motor authority or
             // issue START/boot-test commands during the health check.
@@ -131,68 +138,99 @@ bool hmi_module_start() {
         }
         vTaskDelay(pdMS_TO_TICKS(1));
     }
-    if (startup.state(hmi_platform.now_ms()) != StartupLink::State::Ready) {
-        music_box_boot_error(&hmi_platform);
-        return false;
-    }
     song_store_start();
-    ESP_LOGI("hmi", "USB role: %s; hold BOOT 2s after changing cable to select again",
-             usb_device ? "PC simulator" : "MIDI host");
-    if(!usb_device) {
-        ESP_ERROR_CHECK(usb_serial_jtag_driver_uninstall());
+    initial_pc=usb_serial_jtag_is_connected();
+    ESP_LOGI("hmi", "USB auto role: %s",initial_pc ? "PC simulator" : "MIDI host");
+    if(!initial_pc) {
+        serial_stop();
         hmi_boot_status("MIDI HOST",90,0);
         midi_app_start();
     }
     if(usb_device)hmi_boot_status("USB PC",90,0);
-    ESP_ERROR_CHECK(gpio_set_direction(GPIO_NUM_0,GPIO_MODE_INPUT));
-    ESP_ERROR_CHECK(gpio_set_pull_mode(GPIO_NUM_0,GPIO_PULLUP_ONLY));
+    usb_role.begin(usb_device,hmi_platform.now_ms());
     return true;
 }
-void hmi_module_tick(uint32_t now) {
+static void handle_action(const uint8_t *bytes,uint16_t count) {
+    static uint8_t previous[13];static bool previous_valid=false;static uint32_t previous_at=0;
+    const uint32_t now=hmi_platform.now_ms();
+    bool duplicate=count==13&&previous_valid&&now-previous_at<2000&&!memcmp(previous,bytes,13);
+    if(duplicate||(count==13&&song_store_action(bytes[5],bytes[6],uint32_t(bytes[7])|uint32_t(bytes[8])<<8|uint32_t(bytes[9])<<16|uint32_t(bytes[10])<<24))) {
+        if(!duplicate){memcpy(previous,bytes,13);previous_valid=true;previous_at=now;}
+        uint8_t reply[8],ok=0;control::encode(reply,0x51,&ok,1,bytes[3]);ui_bridge::music_box_control_frame(reply,8);return;
+    }
+    controller_link.action(bytes,count,now);
+}
+static void control_tick(uint32_t now) {
+    update_usb_role(now);
     uint8_t bytes[256];
     // UART first every iteration. USB input is parsed separately, never byte-mixed with UART.
-    int count = esp_link_read(bytes, sizeof(bytes));
-    for (int i = 0; i < count; ++i) {song_store_feed(bytes[i]);link.feed(control::Uart, bytes[i], now);}
+    int count;
+    for(unsigned batch=0;batch<16;++batch) {
+        count=esp_link_read(bytes,sizeof(bytes));
+        for(int i=0;i<count;++i){song_store_feed(bytes[i]);controller_link.feed(control::Uart,bytes[i],now);}
+        if(count<int(sizeof(bytes)))break;
+    }
     if(usb_device) {
         count = usb_serial_jtag_read_bytes(bytes, sizeof(bytes), 0);
-        for (int i = 0; i < count; ++i) link.feed(control::Usb, bytes[i], now);
-    } else midi_app_tick(now);
-    link.tick(hmi_platform.now_ms());
-    pc_control_active=(link.source_flags(control::Uart,now)&16)!=0;
-    song_store_boot(link.active()==control::Uart,
-        (link.source_flags(control::Uart,now)&16)||midi_connected);
+        for (int i = 0; i < count; ++i) controller_link.feed(control::Usb, bytes[i], now);
+    }
+    midi_connected=usb_device ? (controller_link.source_flags(control::Usb,now)&8)!=0 : midi_app_connected();
+    controller_link.tick(hmi_platform.now_ms());
+    // A fresh simulator STATE advertises a virtual MIDI instrument, even at rest.
+    // The lease removes its connection icon when the app closes or USB is lost.
+    const bool simulated_midi = usb_device && (controller_link.source_flags(control::Usb,now)&8);
+    const bool selected_simulated_midi = simulated_midi && controller_link.active()==control::Usb &&
+        !(controller_link.source_flags(control::Usb,now)&4);
+    UiCommand action;
+    for(unsigned n=0;n<16&&xQueueReceive(ui_commands,&action,0)==pdTRUE;++n) {
+        if(action.diagnostic) {if(usb_device)outputs[1].add(action.bytes,action.length);}
+        else handle_action(action.bytes,action.length);
+    }
+    ui_bridge::music_box_midi_input(selected_simulated_midi ||
+        (midi_connected && !(controller_link.source_flags(control::Uart,now)&4)));
+    pc_control_active=(controller_link.source_flags(control::Uart,now)&16)!=0;
+    song_store_boot(controller_link.active()==control::Uart,
+        (controller_link.source_flags(control::Uart,now)&16)||midi_connected);
     song_store_tick(now);
-    music_box_control_connections((link.active() == control::Uart ? 1u : 0u) |
-        ((usb_device && usb_serial_jtag_is_connected()) ||
-         (link.source_flags(control::Uart, now) & 16) ? 2u : 0u) |
-        (!usb_device && midi_connected ? 4u : 0u));
+    ui_bridge::music_box_control_connections((controller_link.active() == control::Uart ? 1u : 0u) |
+        ((controller_link.source_flags(control::Uart, now) & 16) ? 2u : 0u) |
+        (simulated_midi || (!usb_device && midi_connected) ? 4u : 0u));
     if (heartbeat_due || now - last_heartbeat >= 100) {
-        uint8_t frame[13], payload[6] = {255, 0, uint8_t(link.active() == control::Uart), 0, 0, 0};
+        uint8_t frame[13], payload[6] = {255, 0, uint8_t(controller_link.active() == control::Uart), 0, 0, 0};
         control::encode(frame, 0x50, payload, 6);
         outputs[0].add(frame, 13); last_heartbeat = now; heartbeat_due = false;
     }
     outputs[0].flush(control::Uart);
-    if(usb_device && now-last_diagnostics>=500 && outputs[1].head==outputs[1].tail) {
+    if(usb_device&&now-last_link_report>=500) {
+        uint32_t values[6];uint8_t p[24],frame[31];esp_link_stats(values);
+        for(unsigned i=0;i<6;++i)put32(p+4*i,values[i]);
+        control::encode(frame,0x61,p,24);outputs[1].add(frame,31);last_link_report=now;
+    }
+    if(usb_device)outputs[1].flush(control::Usb);
+}
+void hmi_module_run() {
+    ui_commands=xQueueCreate(16,sizeof(UiCommand));configASSERT(ui_commands);
+    configASSERT(xTaskCreatePinnedToCore([](void*) {
+        for(;;){control_tick(hmi_platform.now_ms());ulTaskNotifyTake(pdTRUE,pdMS_TO_TICKS(1));}
+    },"song-control",8192,nullptr,8,&controller_task,1)==pdPASS);
+}
+void hmi_module_tick(uint32_t now) {
+    ui_bridge::drain();
+    ui_bridge::set_screen_ready(music_box_screen_ready());
+    if(usb_device && now-last_diagnostics>=500) {
         uint8_t p[32]{},b[39];
         put32(p,hmi_debug.touch_polls);put32(p+4,hmi_debug.touch_rejects);
         put32(p+8,hmi_debug.touch_cancels);put32(p+12,hmi_debug.touch_events);
         put32(p+16,hmi_debug.max_loop_ms);put32(p+20,hmi_debug.touch_down);
         put32(p+24,hmi_debug.raw_x);put32(p+28,hmi_debug.raw_y);
-        outputs[1].add(b,control::encode(b,0x60,p,sizeof(p)));
+        UiCommand diagnostic{};diagnostic.diagnostic=true;
+        diagnostic.length=control::encode(b,0x60,p,sizeof(p));memcpy(diagnostic.bytes,b,diagnostic.length);
+        xQueueSend(ui_commands,&diagnostic,0);
         last_diagnostics=now;hmi_debug.max_loop_ms=0;
-    }
-    if(usb_device)outputs[1].flush(control::Usb);
-    if(!gpio_get_level(GPIO_NUM_0)) {
-        if(!boot_pressed)boot_pressed=now;
-    } else if(boot_pressed) {
-        const bool restart=now-boot_pressed>=2000;boot_pressed=0;
-        // Restart on release so BOOT is not held while ROM samples the boot strap.
-        if(restart)esp_restart();
     }
 }
 void hmi_module_send(const uint8_t *bytes, uint16_t count) {
-    if(count==13&&song_store_action(bytes[5],bytes[6],uint32_t(bytes[7])|uint32_t(bytes[8])<<8|uint32_t(bytes[9])<<16|uint32_t(bytes[10])<<24)) {
-        uint8_t reply[8],ok=0;control::encode(reply,0x51,&ok,1,bytes[3]);music_box_control_frame(reply,8);return;
-    }
-    link.action(bytes, count, hmi_platform.now_ms());
+    if(!ui_commands||count>48)return;
+    UiCommand action{};action.length=count;memcpy(action.bytes,bytes,count);
+    if(xQueueSend(ui_commands,&action,0)==pdTRUE)xTaskNotifyGive(controller_task);
 }

@@ -2,7 +2,8 @@
 import base64
 from pathlib import Path
 from serial.tools import list_ports
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QEvent
+from piano_widget import PianoWidget
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QComboBox, QGroupBox, QProgressBar, QSpinBox,
     QFileDialog, QSlider)
@@ -13,10 +14,10 @@ class SimulatorWindow(QMainWindow):
         super().__init__()
         self.session=session
         self.setWindowTitle('USB — Симулятор основного контроллера')
-        self.resize(870,620)
+        self.resize(960,850)
         central=QWidget();self.setCentralWidget(central);layout=QVBoxLayout(central)
-        intro=QLabel('Проверка экрана ESP32: MIDI, шесть моторов и команды с тача.\n'
-                     'Подключи USB к ПК и нажми RESET на ESP. Данные STM32 по UART имеют приоритет.')
+        intro=QLabel('MIDI через ESP32 → STM32 → моторы. Клавиатура и MIDI-файлы управляют настоящими моторами.\n'
+                     'Подключи ESP по USB к ПК, а STM32 — к ESP. Экран ESP показывает реальные состояния STM32.')
         intro.setWordWrap(True);layout.addWidget(intro)
         row=QHBoxLayout();layout.addLayout(row)
         self.ports=QComboBox();self.ports.setMinimumWidth(330);row.addWidget(self.ports,1)
@@ -42,6 +43,19 @@ class SimulatorWindow(QMainWindow):
             bar.setTextVisible(False);bar.setMinimumHeight(140);column.addWidget(bar,0,Qt.AlignHCenter)
             label=QLabel('—');label.setAlignment(Qt.AlignCenter);column.addWidget(label)
             self.voices.append((bar,label))
+        group=QGroupBox('MIDI-пианино · до 6 голосов');layout.addWidget(group)
+        piano_layout=QVBoxLayout(group)
+        row=QHBoxLayout();piano_layout.addLayout(row)
+        row.addWidget(QLabel('Нижняя октава:'))
+        self.octave=QSpinBox();self.octave.setRange(0,7);self.octave.setValue(3);row.addWidget(self.octave)
+        self.button(row,'Играть с клавиатуры',lambda:self.piano.setFocus())
+        row.addStretch()
+        hint=QLabel('Белые: Z X C V B N M / Q W E R T Y U · чёрные: S D G H J / 2 3 5 6 7\n'
+                    'Нажми на пианино и играй. Русская раскладка тоже работает. Esc — отпустить ноты.')
+        piano_layout.addWidget(hint)
+        self.piano=PianoWidget();piano_layout.addWidget(self.piano)
+        self.piano.noteChanged.connect(lambda note,down:self.command('note',note=note,down=down))
+        self.octave.valueChanged.connect(self.piano.set_octave)
         row=QHBoxLayout();layout.addLayout(row);row.addWidget(QLabel('Нота MIDI:'))
         self.note=QSpinBox();self.note.setRange(0,127);self.note.setValue(60);row.addWidget(self.note)
         self.button(row,'Note On',lambda:self.command('note',note=self.note.value(),down=True))
@@ -56,6 +70,7 @@ class SimulatorWindow(QMainWindow):
             QTimer.singleShot(0,self.connect_port)
         self.timer=QTimer(self);self.timer.timeout.connect(self.update_state);self.timer.start(100)
         self.update_state()
+        QTimer.singleShot(0,self.piano.setFocus)
 
     def button(self,layout,text,callback):
         button=QPushButton(text);button.clicked.connect(callback);layout.addWidget(button);return button
@@ -76,6 +91,8 @@ class SimulatorWindow(QMainWindow):
 
     def command(self,command,**data):
         try:
+            if command in ('disconnect','connect','demo','midi','play','stop'):
+                self.piano.release_all()
             self.session.command(dict(command=command,**data));self.error.clear()
         except Exception as exc:self.error.setText(str(exc))
         self.update_state()
@@ -96,9 +113,10 @@ class SimulatorWindow(QMainWindow):
     def update_state(self):
         s=self.session.status();connected=bool(s['port'])
         self.connection.setText(f"Порт открыт: {s['port']} · отправлено {s['bytes']} байт" if connected else 'Не подключён')
+        if connected:self.connection.setText(self.connection.text()+(' · STM32 принимает MIDI' if s['midi_ack'] else ' · ожидается подтверждение STM32'))
         self.connect_button.setEnabled(not connected);self.disconnect_button.setEnabled(connected)
         self.ports.setEnabled(not connected);self.refresh_button.setEnabled(not connected)
-        if s['error']:self.error.setText(s['error'])
+        self.error.setText(s['error'])
         self.title.setText(s['title']);self.play_button.setText('Пауза' if s['playing'] else 'Играть')
         self.position.setMaximum(max(1,s['duration']-1))
         if not self.position.isSliderDown():self.position.setValue(s['position'])
@@ -114,6 +132,16 @@ class SimulatorWindow(QMainWindow):
                 f"палец {'нажат' if d[5] else 'отпущен'} · X={d[6]} Y={d[7]}\n"
                 f"Макс. цикл ESP: {d[4]} мс · отчёт {s['diagnostics_age']:.1f} с назад")
         else:self.diagnostics.setText('Диагностика тача: ожидается отчёт ESP')
+        d=s.get('link_diagnostics')
+        if d:self.diagnostics.setText(self.diagnostics.text()+
+            f'\nUART ESP–STM: запросов {d[0]}, ответов {d[1]}, тайм-аутов {d[2]}, '
+            f'потерь RX {d[3]}, макс. обмен {d[4]/1000:.1f} мс, очередь занята {d[5]}')
 
     def closeEvent(self,event):
+        self.piano.release_all()
         self.timer.stop();self.session.close();event.accept()
+
+    def event(self,event):
+        if event.type()==QEvent.WindowDeactivate and hasattr(self,'piano'):
+            self.piano.release_all()
+        return super().event(event)

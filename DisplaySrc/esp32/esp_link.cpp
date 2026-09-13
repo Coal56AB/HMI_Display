@@ -11,6 +11,7 @@
 #include "freertos/queue.h"
 #include "freertos/stream_buffer.h"
 #include <cstring>
+#include <atomic>
 
 namespace {
 constexpr uart_port_t port=UART_NUM_1;
@@ -20,7 +21,12 @@ struct Packet {uint8_t length;uint8_t data[208];};
 QueueHandle_t commands, notes;
 StreamBufferHandle_t received;
 TaskHandle_t worker;
+std::atomic<uint32_t> stats[6]{}; // requests, replies, timeouts, RX drops, max us, TX rejects
+void configure_uart();
 void task(void *) {
+    // ESP-IDF allocates UART interrupts on the calling core. Keep the ISR
+    // beside this worker, away from the LCD/SPI task on core 0.
+    configure_uart();
     uint8_t sequence=0;
     for(;;) {
         Packet p{};
@@ -32,6 +38,7 @@ void task(void *) {
         // our echo, which is rejected by its REQUEST type instead of flushing
         // a possibly early slave response after TX completion.
         uart_flush_input(port);
+        const int64_t began=esp_timer_get_time();++stats[0];
         uart_write_bytes(port,bytes,n);
         HdParser parser{};
         const int64_t deadline=esp_timer_get_time()+HD_MASTER_TIMEOUT_MS*1000;
@@ -45,21 +52,22 @@ void task(void *) {
                 // UI backpressure must not stall MIDI or retain half a reply.
                 if(xStreamBufferSpacesAvailable(received)>=size)
                     xStreamBufferSend(received,parser.bytes+5,size,0);
+                else ++stats[3];
+                ++stats[1];
                 done=true;
             }
         }
-        // A reply completes the slave's turn. Without one, the 20 ms timeout
+        if(!done)++stats[2];
+        uint32_t elapsed=uint32_t(esp_timer_get_time()-began);
+        if(elapsed>stats[4].load())stats[4]=elapsed;
+        // A reply completes the slave's turn. Without one, the 30 ms timeout
         // exceeds the slave's start deadline plus maximum wire duration.
         // New MIDI/actions wake us immediately; idle polling runs every 5 ms.
         if(!uxQueueMessagesWaiting(commands)&&!uxQueueMessagesWaiting(notes))
             ulTaskNotifyTake(pdTRUE,pdMS_TO_TICKS(5));
     }
 }
-}
-void esp_link_start() {
-    commands=xQueueCreate(8,sizeof(Packet));notes=xQueueCreate(1,sizeof(Packet));
-    received=xStreamBufferCreate(4096,1);
-    configASSERT(commands&&notes&&received);
+void configure_uart() {
     uart_config_t cfg{};
     cfg.baud_rate=HD_BAUD;cfg.data_bits=UART_DATA_8_BITS;
     cfg.parity=UART_PARITY_DISABLE;cfg.stop_bits=UART_STOP_BITS_1;
@@ -73,6 +81,14 @@ void esp_link_start() {
     esp_rom_gpio_connect_out_signal(wire,U1TXD_OUT_IDX,false,false);
     esp_rom_gpio_connect_in_signal(wire,U1RXD_IN_IDX,false);
     ESP_ERROR_CHECK(uart_driver_install(port,2048,0,0,nullptr,0));
+    ESP_ERROR_CHECK(uart_set_rx_full_threshold(port,32));
+    ESP_ERROR_CHECK(uart_set_rx_timeout(port,2));
+}
+}
+void esp_link_start() {
+    commands=xQueueCreate(8,sizeof(Packet));notes=xQueueCreate(1,sizeof(Packet));
+    received=xStreamBufferCreate(4096,1);
+    configASSERT(commands&&notes&&received);
     configASSERT(xTaskCreatePinnedToCore(task,"stm-link",4096,nullptr,21,&worker,1)==pdPASS);
 }
 int esp_link_send(const uint8_t *data,unsigned length) {
@@ -80,9 +96,10 @@ int esp_link_send(const uint8_t *data,unsigned length) {
     Packet p{};p.length=(uint8_t)length;memcpy(p.data,data,length);
     const bool midi=length==14&&data[0]==0xd3&&data[1]==0x91;
     const BaseType_t ok=midi?xQueueOverwrite(notes,&p):xQueueSend(commands,&p,0);
-    if(ok!=pdTRUE)return 0;
+    if(ok!=pdTRUE){++stats[5];return 0;}
     xTaskNotifyGive(worker);return (int)length;
 }
 int esp_link_read(uint8_t *data,unsigned capacity) {
     return (int)xStreamBufferReceive(received,data,capacity,0);
 }
+void esp_link_stats(uint32_t out[6]){for(unsigned i=0;i<6;++i)out[i]=stats[i].load();}

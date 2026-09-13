@@ -10,17 +10,18 @@ public:
     static constexpr uint32_t retry_ms = 20;
     explicit StartupLink(uint32_t now): started(now), last_probe(now-retry_ms), probe(ignore_frame, ignore_source, ignore_send) {}
     bool probe_due(uint32_t now) {
-        return state(now) == State::Waiting && uint32_t(now-last_probe) >= retry_ms;
+        return state(now) != State::Ready && uint32_t(now-last_probe) >= retry_ms;
     }
     void probe_sent(uint32_t now) { last_probe = now; }
     void feed(uint8_t byte, uint32_t now) {
-        if (state(now) == State::Waiting) probe.feed(control::Uart, byte, now);
+        if (state(now) != State::Ready) probe.feed(control::Uart, byte, now);
     }
     State state(uint32_t now) {
-        if (result != State::Waiting) return result;
+        if (result == State::Ready) return result;
         probe.tick(now);
-        if (uint32_t(now - started) >= timeout_ms) result = State::Failed;
-        else if (probe.active() == control::Uart) result = State::Ready;
+        // Timeout changes the message, not our ability to recover a late link.
+        if (probe.active() == control::Uart) result = State::Ready;
+        else if (uint32_t(now - started) >= timeout_ms) result = State::Failed;
         return result;
     }
 private:

@@ -1,6 +1,7 @@
+# Shared LCD/touch platform; applications supply their own services and dependencies.
 set(hmi_sources main.cpp hmi_board.cpp)
 set(hmi_includes . ../../Api)
-set(hmi_requires driver esp_timer esp_partition)
+set(hmi_requires driver esp_timer)
 set(hmi_defines "")
 # A branch-specific extension owns its GUI and application, not this platform.
 set(hmi_extension "${CMAKE_CURRENT_LIST_DIR}/../../../DisplaySrc/esp32/CMakeLists.txt")
