@@ -64,3 +64,8 @@ Desktop.ini
 
 # Local module selection metadata
 *.display.json
+
+/Firmware/ESP32/sdkconfig.*
+!/Firmware/ESP32/sdkconfig.defaults
+/Firmware/ESP32/managed_components/
+/Firmware/ESP32/dependencies.lock

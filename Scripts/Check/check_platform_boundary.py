@@ -11,12 +11,14 @@ for p in (ROOT/'DisplaySrc/Platform').rglob('*.[ch]'):
     assert '"board.h"' not in text and '"main.h"' not in text and 'HAL_' not in text,p
 with tempfile.TemporaryDirectory(prefix='display-contract-') as tmp:
     module=Path(tmp)
-    (module/'minimal.c').write_text("""#include "display_api.h"
-static const DisplayPlatform *api;static unsigned dirty=1;static uint16_t color=0x1234;
+    (module/'minimal.c').write_text("""#include "display_renderer.h"
+DISPLAY_RENDER_STORAGE(storage,480*2,0);
+static DisplayRenderer renderer;static uint16_t color=0x1234;
 const DisplayModule display_module={DISPLAY_API_VERSION,0,0,0,0};
-void display_init(const DisplayPlatform *p){api=p;}
-void display_event(const DisplayEvent *e){if(e->type==DISPLAY_TOUCH&&e->down){color^=0xffff;dirty=1;}}
-void display_step(uint32_t now){(void)now;if(dirty){api->write_rect(0,0,1,1,&color,1,0);dirty=0;}}
+static void paint(DisplayCanvas *canvas,void *user){(void)user;display_canvas_fill(canvas,0,0,480,320,color);}
+void display_init(const DisplayPlatform *p){display_renderer_init(&renderer,p,480,320,storage,0);display_renderer_full(&renderer);}
+void display_event(const DisplayEvent *e){if(e->type==DISPLAY_TOUCH&&e->down){color^=0xffff;display_renderer_full(&renderer);}}
+void display_step(uint32_t now){(void)now;DisplayRenderStyle style={DRAW_LEFT_TO_RIGHT,{0,0,0,0},0,0};display_renderer_step(&renderer,paint,0,&style);}
 """)
     (module/'module.json').write_text(json.dumps({'apiVersion':2,'firmware':{'sources':['minimal.c'],'includes':['.'],'defines':[]}}))
     project=configure(module,module/'build/alternate.uvprojx')
