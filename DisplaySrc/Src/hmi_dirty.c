@@ -1,5 +1,6 @@
 #include "hmi.h"
 #include "hmi_gfx.h"
+#include "hmi_plot.h"
 
 #include <stddef.h>
 #include <string.h>
@@ -11,6 +12,18 @@ static HmiRect dirty[HMI_DIRTY_CAPACITY];
 static uint8_t dirty_count;
 static uint32_t flushed_pixels;
 static uint32_t dirty_revision;
+
+/* Re-render the previous plot from owned coordinates instead of keeping a 25 KB
+ * image on the 20 KB STM32. Only the temporary comparison strip is 4 bpp. */
+#define GRAPH_DIFF_PIXELS HMI_PLOT_DIFF_PIXELS /* four full-height columns */
+static HmiPlotWorkspace *graph_workspace;
+#define graph_previous (graph_workspace->previous)
+#define graph_old (graph_workspace->old)
+#define graph_changed (graph_workspace->changed)
+static int graph_previous_valid;
+static HmiFlushRectFn graph_sink;
+static void *graph_user;
+void hmi_plot_forget(void){graph_previous_valid=0;}
 
 void hmi_draw_generated_scene(HmiSceneId id,uint16_t band_y,uint16_t band_h);
 void hmi_draw_dynamic(const HmiState *state);
@@ -42,7 +55,7 @@ static HmiRect joined(HmiRect a,HmiRect b) {
     r.x=x0;r.y=y0;r.width=(uint16_t)(x1-x0);r.height=(uint16_t)(y1-y0);return r;
 }
 
-void hmi_init(void){dirty_count=0u;flushed_pixels=0u;}
+void hmi_init(void){dirty_count=0u;flushed_pixels=0u;graph_previous_valid=0;}
 
 void hmi_invalidate(HmiRect rect) {
     uint8_t i=0;rect=clamp_rect(rect);if(!rect.width||!rect.height)return;
@@ -59,7 +72,7 @@ void hmi_invalidate(HmiRect rect) {
     dirty_count=1u;dirty[0].x=0u;dirty[0].y=0u;dirty[0].width=320u;dirty[0].height=480u;
 }
 
-void hmi_invalidate_all(void){HmiRect r={0u,0u,320u,480u};dirty_count=0u;hmi_invalidate(r);}
+void hmi_invalidate_all(void){HmiRect r={0u,0u,320u,480u};graph_previous_valid=0;dirty_count=0u;hmi_invalidate(r);}
 
 void hmi_diff_and_invalidate(const HmiState *a,const HmiState *b){
     unsigned i;int selection_variant;if(!a||!b){hmi_invalidate_all();return;}
@@ -120,17 +133,92 @@ void hmi_diff_and_invalidate(const HmiState *a,const HmiState *b){
 
 int hmi_dirty_pending(void){return dirty_count!=0;}
 
+static int live_plot(const HmiState *s){
+    return s->dynamic_values&&(s->telemetry_flags&128u)&&s->page==HMI_PAGE_GRAPHS&&s->dialog==HMI_DIALOG_NONE;
+}
+static unsigned plot_code(uint16_t color){
+    static const uint16_t palette[]={4357,12841,62946,34276,11516,50044,62530,9339,47996,61342};
+    unsigned i;for(i=0;i<sizeof(palette)/sizeof(palette[0]);i++)if(palette[i]==color)return i;
+    return 15u; /* Unknown colors always transfer, never silently disappear. */
+}
+static int changed(unsigned i){return (graph_changed[i/8u]>>(i&7u))&1u;}
+static void unchange(unsigned i){graph_changed[i/8u]&=(uint8_t)~(1u<<(i&7u));}
+
+/* All writes are synchronous; the strip remains owned until flush returns.
+ * Stop immediately when a callback queues new work (including navigation). */
+static int plot_flush(HmiRect r,HmiFlushRectFn flush,void *user,uint32_t revision){
+    const uint16_t *pixels=ui_strip_data();unsigned pass,x,y,n=(unsigned)r.width*r.height,total=0,rects=0;
+    /* Plan first, then send: a noisy strip must not be transmitted twice. */
+    for(pass=0;pass<2;pass++){
+      memset(graph_changed,0,sizeof(graph_changed));total=0;rects=0;
+      for(x=0;x<n;x++){
+        unsigned code=plot_code(pixels[x]),old=(graph_old[x/2u]>>((x&1u)*4u))&15u;
+        if(code==15u||code!=old){graph_changed[x/8u]|=(uint8_t)(1u<<(x&7u));total++;}
+      }
+      if(!total)return 1;
+      if(total>n*9u/10u)goto whole;
+      for(x=0;x<r.width;x++)for(y=0;y<r.height;y++)if(changed(y*r.width+x)){
+        unsigned w=1,h=1,xx,yy;
+        while(y+h<r.height&&changed((y+h)*r.width+x))h++;
+        while(x+w<r.width){
+            for(yy=0;yy<h;yy++)if(!changed((y+yy)*r.width+x+w))break;
+            if(yy!=h)break;
+            w++;
+        }
+        /* Bound command overhead on noisy traces. Re-sending the strip is
+         * cheaper than hundreds of one-pixel windows. */
+        if(++rects>32u||total+6u*rects>n+6u)goto whole;
+        if(pass){
+            flush((uint16_t)(r.x+x),(uint16_t)(r.y+y),(uint16_t)w,(uint16_t)h,pixels+y*r.width+x,r.width,user);
+            flushed_pixels+=w*h;
+            if(revision!=dirty_revision)return 0;
+        }
+        for(xx=0;xx<w;xx++)for(yy=0;yy<h;yy++)unchange((y+yy)*r.width+x+xx);
+      }
+    }
+    return 1;
+whole:
+    flush(r.x,r.y,r.width,r.height,pixels,r.width,user);flushed_pixels+=n;
+    return revision==dirty_revision;
+}
+
+static void remember_plot(const HmiState *s,HmiFlushRectFn flush,void *user){
+    graph_previous_valid=0;if(!live_plot(s))return;
+    graph_sink=flush;graph_user=user;graph_previous_valid=hmi_plot_capture(s,&graph_previous);
+}
+
 void hmi_render_dirty_ex(const HmiState *state,HmiFlushRectFn flush,void *user,HmiPaintFn paint,void *paint_user) {
     uint32_t revision=dirty_revision;
-    uint8_t i;HmiSceneId scene;if(!state||!flush)return;scene=hmi_scene_for_state(state);flushed_pixels=0u;
+    uint8_t i;HmiSceneId scene;flushed_pixels=0u;if(!state||!flush||!dirty_count)return;scene=hmi_scene_for_state(state);
+    graph_workspace=ui_plot_workspace();
     HmiState background=*state;if(state->dialog==HMI_DIALOG_CONFIRM){background.dialog=HMI_DIALOG_NONE;scene=hmi_scene_for_state(&background);}
     for(i=0;i<dirty_count;i++){
         HmiRect r=dirty[i];uint16_t y=r.y,remaining=r.height;
+        unsigned plot_right=(state->graph_page==HMI_GRAPH_SPEED&&state->drive_mode==HMI_DRIVE_SF)?310u:286u;
+        int plot_only=live_plot(state)&&r.x>=30u&&r.x+r.width<=plot_right&&r.y>=106u&&r.y+r.height<=284u;
+        if(plot_only&&graph_previous_valid&&graph_sink==flush&&graph_user==user&&
+           graph_previous.width+31u==plot_right){
+            while(r.width){
+                unsigned k,n;HmiRect part=r;
+                unsigned capacity=HMI_RENDER_BUFFER_PIXELS<GRAPH_DIFF_PIXELS?HMI_RENDER_BUFFER_PIXELS:GRAPH_DIFF_PIXELS;
+                unsigned columns=capacity/r.height;if(columns>8u)columns=8u;
+                if(part.width>columns)part.width=(uint16_t)columns;
+                ui_begin_rect(part.x,part.y,part.width,part.height,0u);hmi_plot_draw(&graph_previous);
+                n=(unsigned)part.width*part.height;memset(graph_old,0xff,sizeof(graph_old));
+                for(k=0;k<n;k++){
+                    unsigned shift=(k&1u)*4u,code=plot_code(ui_strip_data()[k]);
+                    graph_old[k/2u]=(uint8_t)((graph_old[k/2u]&~(15u<<shift))|(code<<shift));
+                }
+                ui_begin_rect(part.x,part.y,part.width,part.height,0u);hmi_draw_dynamic(state);
+                if(!plot_flush(part,flush,user,revision)){graph_previous_valid=0;return;}
+                r.x=(uint16_t)(r.x+part.width);r.width=(uint16_t)(r.width-part.width);
+            }
+            continue;
+        }
         uint16_t rows=(uint16_t)(HMI_RENDER_BUFFER_PIXELS/r.width);if(rows<1u)rows=1u;if(rows>16u)rows=16u;
         while(remaining){uint16_t to_band=(uint16_t)(16u-(y&15u));uint16_t part=remaining<rows?remaining:rows;
             uint16_t band_y=(uint16_t)(y&0xfff0u);if(part>to_band)part=to_band;
             ui_begin_rect(r.x,y,r.width,part,0u);
-            int plot_only=(state->telemetry_flags&128u)&&state->page==HMI_PAGE_GRAPHS&&state->dialog==HMI_DIALOG_NONE&&r.x>=30&&r.x+r.width<=286&&r.y>=106&&r.y+r.height<=284;
             if(!plot_only)hmi_draw_generated_scene(scene,band_y,16u);
             hmi_draw_dynamic(&background);
             if(paint&&!plot_only)paint(paint_user);
@@ -138,10 +226,11 @@ void hmi_render_dirty_ex(const HmiState *state,HmiFlushRectFn flush,void *user,H
             flushed_pixels+=(uint32_t)r.width*part;y=(uint16_t)(y+part);remaining=(uint16_t)(remaining-part);
             /* Flush may poll input and invalidate another scene. Keep all
              * queued work, including unfinished background restoration. */
-            if(revision!=dirty_revision)return;
+            if(revision!=dirty_revision){graph_previous_valid=0;return;}
         }
     }
     dirty_count=0u;
+    remember_plot(state,flush,user);
 }
 
 void hmi_render_dirty(const HmiState *state,HmiFlushRectFn flush,void *user){hmi_render_dirty_ex(state,flush,user,NULL,NULL);}
@@ -149,4 +238,4 @@ void hmi_render_dirty(const HmiState *state,HmiFlushRectFn flush,void *user){hmi
 void hmi_render_full(const HmiState *state,HmiFlushRectFn flush,void *user){hmi_invalidate_all();hmi_render_dirty(state,flush,user);}
 uint32_t hmi_dirty_pixel_count(void){return flushed_pixels;}
 uint32_t hmi_static_data_bytes(void){return hmi_generated_data_bytes+ui_font_data_bytes();}
-uint32_t hmi_working_ram_bytes(void){return HMI_RENDER_BUFFER_BYTES+640u;}
+uint32_t hmi_working_ram_bytes(void){return ui_working_buffer_bytes()+640u+sizeof(graph_workspace)+sizeof(graph_sink)+sizeof(graph_user)+sizeof(graph_previous_valid);}

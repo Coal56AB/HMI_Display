@@ -4,6 +4,7 @@
 #define UI_WIDTH 320
 #define UI_HEIGHT 480
 #include "hmi_gfx.h"
+#include "hmi_plot.h"
 
 #if defined(__GNUC__) || defined(__clang__)
 #define UI_EXPORT __attribute__((visibility("default")))
@@ -12,7 +13,16 @@
 #endif
 
 /* Единственный пиксельный буфер; по умолчанию 2048 RGB565 = 4096 байт. */
-static uint16_t ui_strip[HMI_RENDER_BUFFER_PIXELS];
+/* Live plot strips use only the first 712 pixels. Their exact history and
+ * comparison bits occupy the unused tail of the SAME rendering buffer.
+ * A larger ordinary strip invalidates that history before overwriting it. */
+static union {
+    uint16_t pixels[HMI_RENDER_BUFFER_PIXELS];
+    HmiPlotWorkspace plot;
+} ui_work;
+#define ui_strip ui_work.pixels
+HmiPlotWorkspace *ui_plot_workspace(void){return &ui_work.plot;}
+uint32_t ui_working_buffer_bytes(void){return (uint32_t)sizeof(ui_work);}
 static uint8_t ui_text_input[384];
 static int16_t strip_x0,strip_y0;
 static int16_t strip_w,strip_h;
@@ -156,6 +166,7 @@ UI_EXPORT void ui_begin_rect(int x,int y,int width,int height,uint16_t color) {
     if(height<1)height=1;
     pixels=(uint32_t)width*(uint32_t)height;
     if(pixels>HMI_RENDER_BUFFER_PIXELS)height=(int)(HMI_RENDER_BUFFER_PIXELS/(uint32_t)width);
+    if((uint32_t)width*(uint32_t)height>HMI_PLOT_DIFF_PIXELS)hmi_plot_forget();
     strip_x0=(int16_t)x;strip_y0=(int16_t)y;strip_w=(int16_t)width;strip_h=(int16_t)height;
     clip_x0=0;clip_y0=0;clip_x1=UI_WIDTH;clip_y1=UI_HEIGHT;
     {int n=strip_w*strip_h;int i;for(i=0;i<n;i++)ui_strip[i]=color;}

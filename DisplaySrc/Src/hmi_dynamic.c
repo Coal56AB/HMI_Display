@@ -1,5 +1,6 @@
 #include "hmi_state.h"
 #include "hmi_gfx.h"
+#include "hmi_plot.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -30,17 +31,56 @@ static float graph_root(float v){
     for(i=0;i<20;i++)x=(x+v/x)*0.5f;
     return x;
 }
+static const uint16_t plot_colors[5][4]={{62946,34276,11516,50044},{62530,9339,34276,47996},
+    {62530,34276,47996,62530},{62530,34276,47996,0},{62530,9339,47996,0}};
+static int plot_y(const HmiGraphChannel *g,unsigned i){
+    int y=(int)(((int32_t)g->maximum-g->samples[i])*177/((int32_t)g->maximum-g->minimum));
+    return y<0?0:y>177?177:y;
+}
+int hmi_plot_capture(const HmiState *s,HmiPlotImage *image){
+    unsigned ch,i,count=(s->graph_page>=HMI_GRAPH_D||
+        (s->graph_page==HMI_GRAPH_SPEED&&s->drive_mode!=HMI_DRIVE_UF))?3u:4u;
+    if(s->graph_page>HMI_GRAPH_Q)return 0;
+    for(ch=0;ch<count;ch++)if(s->graph[ch].sample_count>HMI_PLOT_POINTS)return 0;
+    image->width=(uint16_t)((s->graph_page==HMI_GRAPH_SPEED&&s->drive_mode==HMI_DRIVE_SF)?279:255);
+    image->cursor=s->graph_cursor;image->valid_count=s->graph_valid_count;
+    for(ch=0;ch<HMI_GRAPH_CHANNELS;ch++){
+        const HmiGraphChannel *g=&s->graph[ch];image->count[ch]=0;
+        image->color[ch]=plot_colors[s->graph_page][ch];
+        if(ch>=count||!g->samples||!g->visible||g->sample_count<2||g->maximum<=g->minimum)continue;
+        image->count[ch]=g->sample_count;
+        for(i=0;i<g->sample_count;i++)image->y[ch][i]=(uint8_t)plot_y(g,i);
+    }
+    return 1;
+}
+static void plot_background(unsigned w){
+    unsigned i;ui_set_clip(30,106,(int)w+1,178);ui_fill_rect(30,106,(int)w+1,178,4357u);
+    for(i=0;i<5;i++)ui_line(30,106+(int)(177*i/4),30+(int)w,106+(int)(177*i/4),12841u);
+    for(i=0;i<6;i++)ui_line(30+(int)(w*i/5),106,30+(int)(w*i/5),283,12841u);
+}
+void hmi_plot_draw(const HmiPlotImage *image){
+    unsigned ch,i;int w=image->width;plot_background((unsigned)w);
+    for(ch=0;ch<HMI_GRAPH_CHANNELS;ch++){
+        int px=0,py=0;
+        for(i=0;i<image->count[ch];i++){
+            int x,y;if(image->valid_count&&i>=image->valid_count)break;
+            x=30+(int)(i*(unsigned)w/(image->count[ch]-1u));y=106+image->y[ch][i];
+            if(i&&i!=image->cursor&&ui_rect_visible(px,py<y?py:y,x-px+1,(py<y?y-py:py-y)+1))
+                ui_line(px,py,x,y,image->color[ch]);
+            px=x;py=y;
+        }
+    }
+    if(image->cursor){int x=30+(image->cursor-1)*w/239;ui_line(x,106,x,283,61342u);}
+    ui_set_clip(1,1,318,478);
+}
 static void draw_live_graph(const HmiState *s){
     unsigned ch,i,count=(s->graph_page>=HMI_GRAPH_D||
         (s->graph_page==HMI_GRAPH_SPEED&&s->drive_mode!=HMI_DRIVE_UF))?3u:4u;
     int w=(s->graph_page==HMI_GRAPH_SPEED&&s->drive_mode==HMI_DRIVE_SF)?279:255;
-    static const uint16_t colors[5][4]={{62946,34276,11516,50044},{62530,9339,34276,47996},
-        {62530,34276,47996,62530},{62530,34276,47996,0},{62530,9339,47996,0}};
-    ui_set_clip(30,106,w+1,178);ui_fill_rect(30,106,w+1,178,4357u);
-    for(i=0;i<5;i++)ui_line(30,106+(int)(177*i/4),30+w,106+(int)(177*i/4),12841u);
-    for(i=0;i<6;i++)ui_line(30+(int)(w*i/5),106,30+(int)(w*i/5),283,12841u);
+    const uint16_t (*colors)[4]=plot_colors;
+    plot_background((unsigned)w);
     ui_set_clip(1,35,318,268);
-    for(i=0;i<6;i++){
+    for(i=0;ui_rect_visible(1,284,318,19)&&i<6;i++){
         char text[24];uint32_t ms=s->graph_offset_ms+(5u-i)*(s->graph_division_ms?s->graph_division_ms:200u);
         if(ms>=1000u)(void)snprintf(text,sizeof(text),"-%.1f с",ms/1000.0);
         else (void)snprintf(text,sizeof(text),ms?"-%lu мс":"%lu мс",(unsigned long)ms);
@@ -50,6 +90,7 @@ static void draw_live_graph(const HmiState *s){
         unsigned index=ch?(s->graph_page<=HMI_GRAPH_SPEED&&count==4?3u:2u):0u;
         const HmiGraphChannel *g=&s->graph[index];float scale=s->graph_scale[index]?s->graph_scale[index]:10;
         if(ch&&w==279)continue;
+        if(!ui_rect_visible(ch?288:9,101,ch?30:21,187))continue;
         ui_set_clip(ch?288:9,101,ch?30:21,187);
         for(i=0;i<5;i++){
             char text[24];float v=(g->maximum-(g->maximum-g->minimum)*i/4.0f)/scale;
@@ -72,13 +113,11 @@ static void draw_live_graph(const HmiState *s){
         if(g->samples&&g->sample_count){
             lo=hi=g->samples[0]/scale;
             for(i=0;i<g->sample_count;i++){
-                float v=g->samples[i]/scale;int x,y;
-                if(stats_visible){sum+=v;squares+=v*v;if(v<lo)lo=v;if(v>hi)hi=v;last=v;}
+                int x,y;
+                if(stats_visible){float v=g->samples[i]/scale;sum+=v;squares+=v*v;if(v<lo)lo=v;if(v>hi)hi=v;last=v;}
                 if((s->graph_valid_count&&i>=s->graph_valid_count)||!g->visible||g->sample_count<2||g->maximum<=g->minimum)continue;
                 x=30+(int)((uint32_t)i*(unsigned)w/(g->sample_count-1u));
-                y=106+(int)(((int32_t)g->maximum-g->samples[i])*177/(g->maximum-g->minimum));
-                if(y<106)y=106;
-                if(y>283)y=283;
+                y=106+plot_y(g,i);
                 if(started&&i!=s->graph_cursor&&ui_rect_visible(px,py<y?py:y,x-px+1,(py<y?y-py:py-y)+1))ui_line(px,py,x,y,color);
                 px=x;py=y;started=1;
             }
