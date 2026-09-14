@@ -112,6 +112,11 @@ int main(void){
     step(&ui,HMI_ACTION_AUTO_START,0,0);step(&ui,HMI_ACTION_AUTO_CANCEL,0,0);
     step(&ui,HMI_ACTION_PAGE,HMI_PAGE_GRAPHS,153600);
     step(&ui,HMI_ACTION_GRAPH_ZOOM,1,7000);step(&ui,HMI_ACTION_GRAPH_RUN,0,16000);
+    /* Starting from history immediately restores the live time axis. */
+    if(ui.graph_running)step(&ui,HMI_ACTION_GRAPH_RUN,0,16000);
+    ui.state.graph_offset_ms=2500;hmi_invalidate_all();verify(&ui,153600);
+    step(&ui,HMI_ACTION_GRAPH_RUN,0,16000);
+    assert(ui.graph_running&&ui.state.graph_offset_ms==0);
     for(i=0;i<4;i++)step(&ui,HMI_ACTION_CUSTOM,200+i,90000);
     step(&ui,HMI_ACTION_PAGE,HMI_PAGE_JOURNAL,153600);
     step(&ui,HMI_ACTION_JOURNAL_EXPORT,0,0);

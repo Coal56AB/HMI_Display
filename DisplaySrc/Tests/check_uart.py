@@ -30,7 +30,7 @@ int main(void){
  assert(ui.state.pending_mask==3);assert(ui.state.pending_setpoints[0]==67);
  assert(ui.state.graph[0].sample_count==240);assert(ui.state.graph[0].samples[239]==239);
  assert(ui.state.graph_scale[0]==100);assert(resets==0);
- assert(ui.graph_running);assert(ui.state.dc_bus_voltage==311);telemetry_poll(&ui,now+10001);
+ assert(ui.state.graph_offset_ms==0);assert(ui.graph_running);assert(ui.state.dc_bus_voltage==311);telemetry_poll(&ui,now+10001);
  assert(ui.state.power_state==HMI_POWER_READY);assert(ui.state.telemetry_flags&64);assert(!(ui.state.telemetry_flags&1));
  return 0;
 }
@@ -50,6 +50,7 @@ int main(void){
       frames.extend([f,f])  # retries must be idempotent
     frames.extend([packet(2,struct.pack('<IBBBBI23f',398,3,0,0,29,200,*values)),packet(2,struct.pack('<IBBBBI23f',399,2,0,0,28,300,*values))])
     frames.extend([packet(8,struct.pack('<IBB5f',400,25,1,.84,.71,4.3,4.3,142)),packet(8,struct.pack('<IBB5f',401,100,2,.84,.71,4.3,4.3,142))])
+    frames.append(packet(11,struct.pack("<II",402,2500)))  # delayed history axis must not restore live offset
     bad=bytearray(frames[0]);bad[-1]^=1
     stream=bytes(bad)+b'noise'+b''.join(frames)
     result=subprocess.run([str(exe)],input=stream,capture_output=True,env=env)

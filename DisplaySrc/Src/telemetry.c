@@ -78,6 +78,7 @@ static uint8_t apply(HmiUi *ui,const uint8_t *p,unsigned type,unsigned n,uint32_
     unsigned i;
     if(type==11){
         uint32_t offset;if(n!=8)return 1;memcpy(&offset,p+4,4);
+        if(ui->graph_running)offset=0;
         if(ui->state.graph_offset_ms!=offset){ui->state.graph_offset_ms=offset;if(ui->state.page==HMI_PAGE_GRAPHS&&ui->state.dialog==HMI_DIALOG_NONE)hmi_invalidate((HmiRect){7,284,306,15});}
         return 0;
     }

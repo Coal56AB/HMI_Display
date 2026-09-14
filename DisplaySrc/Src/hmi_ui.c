@@ -491,6 +491,10 @@ void hmi_ui_dispatch(HmiUi *ui,HmiAction action,int16_t arg){
             event(ui,HMI_EVENT_GRAPH_CHANGED,1,HMI_GRAPH_LIVE_MIN_MS,0,NULL);
             hmi_invalidate((HmiRect){1,284,318,50});
         }
+        if(ui->graph_running&&ui->state.graph_offset_ms){
+            ui->state.graph_offset_ms=0;
+            hmi_invalidate((HmiRect){1,284,318,17});
+        }
         if(ui->graph_running){unsigned c;ui->state.graph_cursor=ui->state.graph_valid_count=0;for(c=0;c<4;c++)ui->state.graph[c].sample_count=0;}
         else ui->state.graph_valid_count=ui->state.graph_cursor;
         event(ui,HMI_EVENT_GRAPH_CHANGED,2,ui->graph_running,0,NULL);break;
